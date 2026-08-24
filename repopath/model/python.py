@@ -36,6 +36,7 @@ class PythonAnalysis:
     core_modules: list[ModuleSummary] = field(default_factory=list)
     dependencies: list[SourceDependency] = field(default_factory=list)
     symbols_by_file: dict[Path, list[SourceSymbol]] = field(default_factory=dict)
+    module_paths: dict[str, Path] = field(default_factory=dict)
 
     @property
     def function_count(self) -> int:

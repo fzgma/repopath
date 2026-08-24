@@ -11,6 +11,8 @@ class GitAnalyzer(Analyzer):
 
     def analyze(self, context, state: AnalysisState) -> AnalysisResult:
         """读取 Git Provider 并返回 Git 历史摘要。"""
-        summary = context.git.summary()
+        summary = context.git.summary(context.options.git_period)
         warnings = [summary.error] if summary.error else []
+        if summary.shallow:
+            warnings.append("当前仓库是浅克隆，Git 演进统计可能不完整")
         return AnalysisResult(name=self.name, data=summary, warnings=warnings)

@@ -85,6 +85,7 @@ class PythonAnalyzer(Analyzer):
         analysis = PythonAnalysis()
         warnings = []
         local_modules = {module_name(file.path, context.repository.root): file for file in files}
+        analysis.module_paths = {name: file.path for name, file in local_modules.items()}
 
         for file in files:
             source = context.filesystem.read_text(file.path)

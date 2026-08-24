@@ -1,6 +1,7 @@
 # Byte-compiled
 __pycache__/
 .pytest_cache/
+.pytest-tmp/
 *.py[codz]
 *$py.class
 __pypackages__/

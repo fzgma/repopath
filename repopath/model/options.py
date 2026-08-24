@@ -1,0 +1,75 @@
+"""仓库分析配置模型。"""
+
+from dataclasses import dataclass, replace
+
+
+VALID_PROFILES = {"fast", "standard", "deep", "custom"}
+VALID_GIT_PERIODS = {"all", "30", "90"}
+
+
+@dataclass(frozen=True)
+class AnalysisOptions:
+    """保存 CLI、配置文件和 UI 共用的分析选项。"""
+
+    profile: str = "deep"
+    python_enabled: bool = True
+    cpp_enabled: bool = True
+    git_enabled: bool = True
+    dependencies_enabled: bool = True
+    insights_enabled: bool = True
+    max_file_size: int | None = 2 * 1024 * 1024
+    follow_symlinks: bool = False
+    result_limit: int = 50
+    git_period: str = "all"
+    excluded_patterns: tuple[str, ...] = ()
+
+    @classmethod
+    def for_profile(cls, profile: str) -> "AnalysisOptions":
+        """根据预设模式创建分析选项。"""
+        if profile not in VALID_PROFILES:
+            raise ValueError(f"未知分析模式：{profile}")
+        if profile == "fast":
+            return cls(
+                profile=profile,
+                python_enabled=False,
+                cpp_enabled=False,
+                git_enabled=False,
+                dependencies_enabled=False,
+                insights_enabled=False,
+            )
+        if profile == "standard":
+            return cls(profile=profile, dependencies_enabled=False, insights_enabled=False)
+        return cls(profile=profile)
+
+    def with_overrides(self, **values: object) -> "AnalysisOptions":
+        """返回应用非空覆盖值后的分析选项。"""
+        filtered = {key: value for key, value in values.items() if value is not None}
+        options = replace(self, **filtered)
+        options.validate()
+        return options
+
+    def validate(self) -> None:
+        """校验分析选项的取值和依赖关系。"""
+        if self.profile not in VALID_PROFILES:
+            raise ValueError(f"未知分析模式：{self.profile}")
+        if self.git_period not in VALID_GIT_PERIODS:
+            raise ValueError("Git 时间范围必须是 all、30 或 90")
+        if self.max_file_size is not None and self.max_file_size <= 0:
+            raise ValueError("最大文件大小必须大于 0")
+        if self.result_limit <= 0:
+            raise ValueError("报告列表最大数量必须大于 0")
+        if self.dependencies_enabled and not (self.python_enabled or self.cpp_enabled):
+            raise ValueError("依赖分析至少需要启用 Python 或 C++ Analyzer")
+        if self.insights_enabled and not self.dependencies_enabled:
+            raise ValueError("阅读洞察需要启用依赖分析")
+
+    def analyzer_enabled(self, name: str) -> bool:
+        """判断指定 Analyzer 是否应在当前配置下运行。"""
+        switches = {
+            "python": self.python_enabled,
+            "cpp": self.cpp_enabled,
+            "git": self.git_enabled,
+            "dependencies": self.dependencies_enabled,
+            "insights": self.insights_enabled,
+        }
+        return switches.get(name, True)

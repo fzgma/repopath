@@ -24,5 +24,7 @@ class StatisticsAnalyzer(Analyzer):
             stats.language_family_counts[family] += 1
             stats.language_family_lines[family] += file.non_empty_lines
             relative = file.path.relative_to(context.repository.root)
-            stats.directory_counts[relative.parts[0] if len(relative.parts) > 1 else "."] += 1
+            directory = relative.parts[0] if len(relative.parts) > 1 else "."
+            stats.directory_counts[directory] += 1
+            stats.directory_lines[directory] += file.non_empty_lines
         return AnalysisResult(name=self.name, data=stats)

@@ -11,6 +11,7 @@ class AnalysisResult:
     data: object | None = None
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    duration_seconds: float = 0.0
 
     @property
     def successful(self) -> bool:
@@ -42,3 +43,19 @@ class AnalysisState:
     def errors(self) -> list[str]:
         """汇总所有 Analyzer 的错误信息。"""
         return [error for result in self.results.values() for error in result.errors]
+
+    @property
+    def durations(self) -> dict[str, float]:
+        """返回各 Analyzer 的执行耗时。"""
+        return {name: result.duration_seconds for name, result in self.results.items()}
+
+
+@dataclass(frozen=True)
+class AnalysisProgress:
+    """描述 Pipeline 的阶段级进度事件。"""
+
+    analyzer: str
+    index: int
+    total: int
+    percent: int
+    status: str

@@ -14,6 +14,7 @@ class RepositoryStats:
     language_family_counts: Counter[str] = field(default_factory=Counter)
     language_family_lines: Counter[str] = field(default_factory=Counter)
     directory_counts: Counter[str] = field(default_factory=Counter)
+    directory_lines: Counter[str] = field(default_factory=Counter)
 
     @property
     def total_non_empty_lines(self) -> int:

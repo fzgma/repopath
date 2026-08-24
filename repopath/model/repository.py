@@ -1,7 +1,28 @@
 """仓库路径模型。"""
 
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
+
+
+class RepositorySourceType(StrEnum):
+    """定义仓库来源类型。"""
+
+    LOCAL = "local"
+    GITHUB = "github"
+
+
+@dataclass(frozen=True)
+class RepositorySource:
+    """描述待分析仓库的来源和位置。"""
+
+    type: RepositorySourceType
+    location: str
+
+    @classmethod
+    def local(cls, path: str | Path) -> "RepositorySource":
+        """创建本地目录仓库来源。"""
+        return cls(RepositorySourceType.LOCAL, str(path))
 
 
 @dataclass(frozen=True)
@@ -17,6 +38,13 @@ class Repository:
         if not root.is_dir():
             raise NotADirectoryError(f"仓库目录不存在：{root}")
         return cls(root=root)
+
+    @classmethod
+    def from_source(cls, source: RepositorySource) -> "Repository":
+        """从当前支持的仓库来源创建本地仓库模型。"""
+        if source.type is not RepositorySourceType.LOCAL:
+            raise NotImplementedError(f"暂不支持仓库来源：{source.type}")
+        return cls.from_path(source.location)
 
     @property
     def name(self) -> str:
