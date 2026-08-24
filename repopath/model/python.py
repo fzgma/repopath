@@ -4,6 +4,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .source import SourceDependency, SourceSymbol
+
 
 @dataclass(frozen=True)
 class EntryPoint:
@@ -20,14 +22,7 @@ class ModuleSummary:
     name: str
     lines: int
     references: int
-
-
-@dataclass(frozen=True)
-class DependencyEdge:
-    """表示一个 Python 模块对另一个本地模块的依赖。"""
-
-    source: str
-    target: str
+    score: int = 0
 
 
 @dataclass
@@ -39,4 +34,15 @@ class PythonAnalysis:
     entry_points: list[EntryPoint] = field(default_factory=list)
     local_references: Counter[str] = field(default_factory=Counter)
     core_modules: list[ModuleSummary] = field(default_factory=list)
-    dependencies: list[DependencyEdge] = field(default_factory=list)
+    dependencies: list[SourceDependency] = field(default_factory=list)
+    symbols_by_file: dict[Path, list[SourceSymbol]] = field(default_factory=dict)
+
+    @property
+    def function_count(self) -> int:
+        """返回已识别的 Python 函数数量。"""
+        return sum(sum(symbol.kind == "function" for symbol in symbols) for symbols in self.symbols_by_file.values())
+
+    @property
+    def class_count(self) -> int:
+        """返回已识别的 Python 类数量。"""
+        return sum(sum(symbol.kind == "class" for symbol in symbols) for symbols in self.symbols_by_file.values())

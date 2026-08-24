@@ -14,3 +14,4 @@ class FileRecord:
     language: Language
     lines: int
     non_empty_lines: int
+    comment_lines: int = 0

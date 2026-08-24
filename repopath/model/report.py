@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 
 from .file import FileRecord
+from .cpp import CppAnalysis
 from .git import GitSummary
 from .python import PythonAnalysis
 from .repository import Repository
@@ -17,6 +18,7 @@ class RepositoryReport:
     files: list[FileRecord] = field(default_factory=list)
     stats: RepositoryStats = field(default_factory=RepositoryStats)
     python: PythonAnalysis = field(default_factory=PythonAnalysis)
+    cpp: CppAnalysis = field(default_factory=CppAnalysis)
     git: GitSummary = field(default_factory=GitSummary)
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)

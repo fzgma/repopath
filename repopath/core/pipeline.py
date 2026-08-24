@@ -3,9 +3,10 @@
 from collections.abc import Iterable
 
 from ..analyzer.base import Analyzer
+from ..analyzer.cpp import CppAnalyzer
 from ..analyzer.file_analyzer import FileAnalyzer
 from ..analyzer.git_analyzer import GitAnalyzer
-from ..analyzer.python_analyzer import PythonAnalyzer
+from ..analyzer.python import PythonAnalyzer
 from ..analyzer.statistics_analyzer import StatisticsAnalyzer
 from ..model.result import AnalysisResult, AnalysisState
 from .context import AnalysisContext
@@ -32,4 +33,4 @@ class Pipeline:
 
 def default_pipeline() -> Pipeline:
     """创建 RepoPath 默认分析流程。"""
-    return Pipeline([FileAnalyzer(), StatisticsAnalyzer(), PythonAnalyzer(), GitAnalyzer()])
+    return Pipeline([FileAnalyzer(), StatisticsAnalyzer(), PythonAnalyzer(), CppAnalyzer(), GitAnalyzer()])

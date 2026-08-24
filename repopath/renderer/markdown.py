@@ -16,6 +16,7 @@ class MarkdownRenderer:
         repository = report.repository
         stats = report.stats
         python = report.python
+        cpp = report.cpp
         git = report.git
         files = report.files
         lines = [
@@ -29,27 +30,29 @@ class MarkdownRenderer:
             f"- 非空行数：{stats.total_non_empty_lines}",
             f"- 识别语言：{len(stats.language_counts)}",
             f"- Python 入口候选：{len(python.entry_points)}",
+            f"- C++ 入口候选：{len(cpp.entry_points)}",
+            f"- 注释行：{stats.total_comment_lines}",
         ]
         if report.warnings or report.errors:
             lines.extend(["", "## 分析提示", ""])
             lines.extend(f"- 警告：{markdown_cell(message)}" for message in report.warnings)
             lines.extend(f"- 错误：{markdown_cell(message)}" for message in report.errors)
 
-        lines.extend(["", "## 语言统计", "", "| 语言 | 文件数 | 非空行 | 文件占比 |", "| --- | ---: | ---: | ---: |"])
-        for language, count in stats.language_counts.most_common():
+        lines.extend(["", "## 语言统计", "", "| 语言族 | 文件数 | 非空行 | 文件占比 |", "| --- | ---: | ---: | ---: |"])
+        for language, count in stats.language_family_counts.most_common():
             percentage = count / len(files) * 100 if files else 0
-            lines.append(f"| {markdown_cell(language)} | {count} | {stats.language_lines[language]} | {percentage:.1f}% |")
+            lines.append(f"| {markdown_cell(language)} | {count} | {stats.language_family_lines[language]} | {percentage:.1f}% |")
 
         lines.extend(["", "## 主要目录", "", "| 目录 | 文件数 |", "| --- | ---: |"])
         for directory, count in stats.directory_counts.most_common(15):
             lines.append(f"| `{markdown_cell(directory)}` | {count} |")
 
-        lines.extend(["", "## 核心模块候选", "", "> 按非空行数和本地模块被引用次数进行轻量排序。", "", "| 模块 | 非空行 | 被引用 |", "| --- | ---: | ---: |"])
+        lines.extend(["", "## Python 核心模块候选", "", "> 按非空行数、本地引用次数和入口特征进行排序。", "", "| 模块 | 非空行 | 被引用 | 评分 |", "| --- | ---: | ---: | ---: |"])
         if python.core_modules:
             for module in python.core_modules[:15]:
-                lines.append(f"| `{markdown_cell(module.name)}` | {module.lines} | {module.references} |")
+                lines.append(f"| `{markdown_cell(module.name)}` | {module.lines} | {module.references} | {module.score} |")
         else:
-            lines.append("| 暂无 Python 模块 | 0 | 0 |")
+            lines.append("| 暂无 Python 模块 | 0 | 0 | 0 |")
 
         lines.extend(["", "## 入口候选", ""])
         if python.entry_points:
@@ -75,6 +78,37 @@ class MarkdownRenderer:
         else:
             lines.append("未检测到仓库内 Python 模块之间的直接依赖。")
 
+        lines.extend(["", "## C++ 分析", ""])
+        if cpp.files:
+            lines.extend([
+                f"- C++ 文件数：{len(cpp.files)}",
+                f"- 函数数：{cpp.function_count}",
+                f"- 类和结构体数：{cpp.type_count}",
+                f"- 命名空间数：{cpp.namespace_count}",
+                f"- main 入口候选：{len(cpp.entry_points)}",
+                "",
+                "### 常用 Include",
+                "",
+                "| Include | 引用次数 |",
+                "| --- | ---: |",
+            ])
+            for include, count in cpp.include_counts.most_common(15):
+                lines.append(f"| `{markdown_cell(include)}` | {count} |")
+            lines.extend(["", "### C++ 入口候选", "", "| 文件 | 行号 |", "| --- | ---: |"])
+            for entry in cpp.entry_points:
+                lines.append(f"| `{markdown_cell(repository.relative_path(entry.path))}` | {entry.line} |")
+            lines.extend(["", "### C++ 符号", "", "| 文件 | 名称 | 类型 | 行号 |", "| --- | --- | --- | ---: |"])
+            for path, item in cpp.files.items():
+                for symbol in [*item.functions, *item.types, *item.namespaces]:
+                    lines.append(
+                        f"| `{markdown_cell(repository.relative_path(path))}` | `{markdown_cell(symbol.name)}` | {symbol.kind} | {symbol.line} |"
+                    )
+            lines.extend(["", "### 本地 Include 依赖", "", "| 来源文件 | 目标文件 |", "| --- | --- |"])
+            for edge in cpp.dependencies[:30]:
+                lines.append(f"| `{markdown_cell(edge.source)}` | `{markdown_cell(edge.target)}` |")
+        else:
+            lines.append("当前没有检测到 C++ 源文件或头文件。")
+
         lines.extend(["", "## Git 历史", ""])
         if not git.available:
             lines.append("未检测到可用的 Git 历史。")
@@ -82,6 +116,8 @@ class MarkdownRenderer:
             lines.extend([
                 f"- 提交数：{git.commit_count}",
                 f"- 贡献者数：{len(git.authors)}",
+                f"- 首次提交：{git.first_commit_date or '未知'}",
+                f"- 最近提交：{git.last_commit_date or '未知'}",
                 "",
                 "### 主要贡献者",
                 "",

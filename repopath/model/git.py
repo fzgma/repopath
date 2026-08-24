@@ -14,4 +14,6 @@ class GitSummary:
     recent_commits: list[tuple[str, str, str, str]] = field(default_factory=list)
     changed_paths: Counter[str] = field(default_factory=Counter)
     commits_by_month: Counter[str] = field(default_factory=Counter)
+    first_commit_date: str | None = None
+    last_commit_date: str | None = None
     error: str | None = None

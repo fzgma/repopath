@@ -1,5 +1,6 @@
 """本地文件系统 Provider。"""
 
+import os
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -41,16 +42,16 @@ class FileSystemProvider:
         return any(part in self.ignored_dirs for part in relative.parts)
 
     def iter_files(self, excluded_paths: set[Path] | None = None) -> Iterator[Path]:
-        """遍历仓库文件并跳过缓存、构建目录和排除路径。"""
+        """剪枝遍历仓库文件并跳过缓存、构建目录和排除路径。"""
         excluded = {path.resolve() for path in (excluded_paths or set())}
-        for path in sorted(self.repository.root.rglob("*")):
-            if (
-                path.is_file()
-                and path.name not in self.ignored_files
-                and not self.is_ignored(path)
-                and path.resolve() not in excluded
-            ):
-                yield path
+        for directory, subdirectories, file_names in os.walk(self.repository.root):
+            subdirectories[:] = sorted(
+                name for name in subdirectories if name not in self.ignored_dirs
+            )
+            for name in sorted(file_names):
+                path = Path(directory, name)
+                if path.name not in self.ignored_files and path.resolve() not in excluded:
+                    yield path
 
     def read_text(self, path: Path) -> str | None:
         """以 UTF-8 容错模式读取文件内容。"""

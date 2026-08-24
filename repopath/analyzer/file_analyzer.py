@@ -21,12 +21,16 @@ class FileAnalyzer(Analyzer):
                 warnings.append(f"无法读取文件：{context.repository.relative_path(path)}")
                 continue
             lines = source.splitlines()
+            comment_lines = sum(
+                line.strip().startswith(("#", "//", "/*", "*", "*/")) for line in lines
+            )
             records.append(
                 FileRecord(
                     path=path,
                     language=detect_language(path),
                     lines=len(lines),
                     non_empty_lines=sum(bool(line.strip()) for line in lines),
+                    comment_lines=comment_lines,
                 )
             )
         return AnalysisResult(name=self.name, data=records, warnings=warnings)

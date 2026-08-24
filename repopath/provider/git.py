@@ -45,6 +45,8 @@ class GitProvider:
                 "--format=%h%x09%an%x09%ad%x09%s",
             ).splitlines()
             month_rows = self._run("log", "--date=format:%Y-%m", "--format=%ad").splitlines()
+            first_commit_date = self._run("log", "--reverse", "-1", "--date=short", "--format=%ad")
+            last_commit_date = self._run("log", "-1", "--date=short", "--format=%ad")
             changed_rows = self._run("log", "--format=", "--name-only").splitlines()
         except (RuntimeError, ValueError) as exc:
             return GitSummary(error=str(exc))
@@ -61,4 +63,6 @@ class GitProvider:
             recent_commits=recent_commits,
             changed_paths=Counter(path for path in changed_rows if path.strip()),
             commits_by_month=Counter(month for month in month_rows if month.strip()),
+            first_commit_date=first_commit_date or None,
+            last_commit_date=last_commit_date or None,
         )

@@ -1,6 +1,7 @@
 """Analyzer 结果合成器。"""
 
 from ..model.git import GitSummary
+from ..model.cpp import CppAnalysis
 from ..model.python import PythonAnalysis
 from ..model.report import RepositoryReport
 from ..model.result import AnalysisState
@@ -15,6 +16,7 @@ def compose_report(context: AnalysisContext, state: AnalysisState) -> Repository
         files=state.get_data("files", []),
         stats=state.get_data("statistics", RepositoryStats()),
         python=state.get_data("python", PythonAnalysis()),
+        cpp=state.get_data("cpp", CppAnalysis()),
         git=state.get_data("git", GitSummary()),
         warnings=state.warnings,
         errors=state.errors,
