@@ -1,6 +1,6 @@
 """循环依赖测试模块 B。"""
 
-import pkg.a
+import pkg.a  # pyright: ignore[reportUnusedImport]
 
 
 def value() -> str:

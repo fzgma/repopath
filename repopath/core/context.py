@@ -18,4 +18,4 @@ class AnalysisContext:
     filesystem: RepositoryFileProvider
     git: GitProvider
     options: AnalysisOptions = field(default_factory=AnalysisOptions)
-    excluded_paths: set[Path] = field(default_factory=set)
+    excluded_paths: set[Path] = field(default_factory=set[Path])

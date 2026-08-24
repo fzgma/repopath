@@ -29,14 +29,14 @@ class ModuleSummary:
 class PythonAnalysis:
     """保存 Python import、入口和本地模块引用分析结果。"""
 
-    imports_by_file: dict[Path, list[str]] = field(default_factory=dict)
-    import_counts: Counter[str] = field(default_factory=Counter)
-    entry_points: list[EntryPoint] = field(default_factory=list)
-    local_references: Counter[str] = field(default_factory=Counter)
-    core_modules: list[ModuleSummary] = field(default_factory=list)
-    dependencies: list[SourceDependency] = field(default_factory=list)
-    symbols_by_file: dict[Path, list[SourceSymbol]] = field(default_factory=dict)
-    module_paths: dict[str, Path] = field(default_factory=dict)
+    imports_by_file: dict[Path, list[str]] = field(default_factory=dict[Path, list[str]])
+    import_counts: Counter[str] = field(default_factory=Counter[str])
+    entry_points: list[EntryPoint] = field(default_factory=list[EntryPoint])
+    local_references: Counter[str] = field(default_factory=Counter[str])
+    core_modules: list[ModuleSummary] = field(default_factory=list[ModuleSummary])
+    dependencies: list[SourceDependency] = field(default_factory=list[SourceDependency])
+    symbols_by_file: dict[Path, list[SourceSymbol]] = field(default_factory=dict[Path, list[SourceSymbol]])
+    module_paths: dict[str, Path] = field(default_factory=dict[str, Path])
 
     @property
     def function_count(self) -> int:

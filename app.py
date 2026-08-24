@@ -1,9 +1,13 @@
 """RepoPath Streamlit 页面。"""
 
 import json
+from collections.abc import Sequence
+from importlib import import_module
 from pathlib import Path
+from typing import Any, TypeAlias, cast
 
 from repopath.core.service import analyze_repository
+from repopath.model.dependency import DependencyEdge
 from repopath.model.options import AnalysisOptions
 from repopath.model.report import RepositoryReport
 from repopath.model.result import AnalysisProgress
@@ -17,13 +21,13 @@ PROFILE_NAMES = {
     "深度": "deep",
 }
 
+StreamlitApi: TypeAlias = Any
 
-def _render_report(report: RepositoryReport, st) -> None:
+
+def _render_report(report: RepositoryReport, st: StreamlitApi) -> None:
     """将分析报告渲染为 Streamlit 页面内容。"""
     stats = report.stats
     graph = report.dependencies
-    insights = report.insights
-    git = report.git
     metrics = st.columns(6)
     metrics[0].metric("文件数", len(report.files))
     metrics[1].metric("非空行", stats.total_non_empty_lines)
@@ -50,7 +54,7 @@ def _render_report(report: RepositoryReport, st) -> None:
         _render_downloads(report, st)
 
 
-def _render_messages(report: RepositoryReport, st) -> None:
+def _render_messages(report: RepositoryReport, st: StreamlitApi) -> None:
     """聚合展示分析警告和错误。"""
     if not report.warnings and not report.errors:
         return
@@ -64,11 +68,11 @@ def _render_messages(report: RepositoryReport, st) -> None:
                 st.info(message)
 
 
-def _render_overview(report: RepositoryReport, st) -> None:
+def _render_overview(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示语言、目录、热点和 Analyzer 耗时概览。"""
     stats = report.stats
     left, right = st.columns(2)
-    language_rows = [
+    language_rows: list[dict[str, object]] = [
         {
             "语言": language,
             "文件数": count,
@@ -91,7 +95,7 @@ def _render_overview(report: RepositoryReport, st) -> None:
             st.info("没有可展示的语言统计。")
     with right:
         st.subheader("主要目录")
-        directory_rows = [
+        directory_rows: list[dict[str, object]] = [
             {
                 "目录": directory,
                 "文件数": count,
@@ -112,7 +116,7 @@ def _render_overview(report: RepositoryReport, st) -> None:
 
     st.subheader("结构热点")
     score_by_id = {item.node_id: item for item in report.insights.module_scores}
-    hotspot_rows = [
+    hotspot_rows: list[dict[str, object]] = [
         {
             "路径": item.path,
             "语言": item.language,
@@ -137,7 +141,7 @@ def _render_overview(report: RepositoryReport, st) -> None:
         st.info("当前没有同时具有依赖中心度和 Git 修改热度的文件。")
 
     with st.expander("Analyzer 耗时"):
-        duration_rows = [
+        duration_rows: list[dict[str, object]] = [
             {"Analyzer": name, "秒": duration}
             for name, duration in report.analyzer_durations.items()
         ]
@@ -145,7 +149,7 @@ def _render_overview(report: RepositoryReport, st) -> None:
             st.bar_chart(duration_rows, x="Analyzer", y="秒", horizontal=True, color="#3A7D44")
 
 
-def _render_reading(report: RepositoryReport, st) -> None:
+def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示推荐阅读顺序和可解释评分明细。"""
     limit = report.options.result_limit
     all_recommendations = report.insights.reading_order
@@ -171,7 +175,7 @@ def _render_reading(report: RepositoryReport, st) -> None:
     if not recommendations:
         st.info("当前配置未生成推荐阅读顺序。")
         return
-    rows = [
+    rows: list[dict[str, object]] = [
         {
             "排名": item.rank,
             "路径": item.path,
@@ -185,7 +189,7 @@ def _render_reading(report: RepositoryReport, st) -> None:
     st.dataframe(rows, width="stretch", hide_index=True, key="reading_order_table")
 
     st.subheader("评分明细")
-    score_rows = [
+    score_rows: list[dict[str, object]] = [
         {
             "路径": item.path,
             "语言": item.language,
@@ -220,7 +224,7 @@ def _top_directory(path: str) -> str:
     return path.split("/", 1)[0] if "/" in path else "."
 
 
-def _render_dependencies(report: RepositoryReport, st) -> None:
+def _render_dependencies(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示可筛选的统一依赖边、循环和孤立模块。"""
     graph = report.dependencies
     if not graph.nodes:
@@ -280,7 +284,11 @@ def _render_dependencies(report: RepositoryReport, st) -> None:
             st.success("未检测到孤立模块。")
 
 
-def _dependency_dot(report: RepositoryReport, nodes: set[str], edges) -> str:
+def _dependency_dot(
+    report: RepositoryReport,
+    nodes: set[str],
+    edges: Sequence[DependencyEdge],
+) -> str:
     """将筛选后的依赖关系转换为 Graphviz DOT 文本。"""
     graph = report.dependencies
     lines = ["digraph dependencies {", "rankdir=LR;", 'node [shape=box, style="rounded,filled"];']
@@ -296,7 +304,7 @@ def _dependency_dot(report: RepositoryReport, nodes: set[str], edges) -> str:
     return "\n".join(lines)
 
 
-def _render_python(report: RepositoryReport, st) -> None:
+def _render_python(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示 Python import、依赖和符号。"""
     python = report.python
     limit = report.options.result_limit
@@ -315,7 +323,7 @@ def _render_python(report: RepositoryReport, st) -> None:
         hide_index=True,
     )
     with st.expander("Python 符号"):
-        symbols = [
+        symbols: list[dict[str, object]] = [
             {
                 "文件": report.repository.relative_path(path),
                 "名称": symbol.name,
@@ -328,7 +336,7 @@ def _render_python(report: RepositoryReport, st) -> None:
         st.dataframe(symbols[:limit], width="stretch", hide_index=True)
 
 
-def _render_cpp(report: RepositoryReport, st) -> None:
+def _render_cpp(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示 C++ include、符号和入口。"""
     cpp = report.cpp
     limit = report.options.result_limit
@@ -347,7 +355,7 @@ def _render_cpp(report: RepositoryReport, st) -> None:
         hide_index=True,
     )
     with st.expander("C++ 符号"):
-        symbols = [
+        symbols: list[dict[str, object]] = [
             {
                 "文件": report.repository.relative_path(path),
                 "名称": symbol.name,
@@ -360,7 +368,7 @@ def _render_cpp(report: RepositoryReport, st) -> None:
         st.dataframe(symbols[:limit], width="stretch", hide_index=True)
 
 
-def _render_git(report: RepositoryReport, st) -> None:
+def _render_git(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示 Git 趋势、文件热点、共同修改和贡献者。"""
     git = report.git
     limit = report.options.result_limit
@@ -372,7 +380,7 @@ def _render_git(report: RepositoryReport, st) -> None:
     metrics[1].metric("贡献者", len(git.authors))
     metrics[2].metric("30 天活跃文件", len(git.recent_30_days))
     metrics[3].metric("90 天活跃文件", len(git.recent_90_days))
-    monthly_rows = [
+    monthly_rows: list[dict[str, object]] = [
         {
             "月份": month,
             "提交数": change.commits,
@@ -389,7 +397,7 @@ def _render_git(report: RepositoryReport, st) -> None:
 
     st.subheader("文件变更热点")
     hottest = sorted(git.file_changes.items(), key=lambda item: (-item[1].churn, item[0]))
-    hotspot_rows = [
+    hotspot_rows: list[dict[str, object]] = [
         {
             "路径": path,
             "提交": change.commits,
@@ -407,7 +415,7 @@ def _render_git(report: RepositoryReport, st) -> None:
         st.dataframe(hotspot_rows, width="stretch", hide_index=True)
 
     with st.expander("共同修改文件"):
-        co_change_rows = [
+        co_change_rows: list[dict[str, object]] = [
             {"文件 A": left, "文件 B": right, "次数": count}
             for (left, right), count in git.co_changes.most_common(limit)
         ]
@@ -416,7 +424,7 @@ def _render_git(report: RepositoryReport, st) -> None:
         else:
             st.info("没有可展示的共同修改关系。")
     with st.expander("目录贡献者"):
-        contributor_rows = [
+        contributor_rows: list[dict[str, object]] = [
             {
                 "目录": directory,
                 "主要贡献者": authors.most_common(1)[0][0],
@@ -431,7 +439,7 @@ def _render_git(report: RepositoryReport, st) -> None:
             st.info("没有可展示的目录贡献者。")
 
 
-def _render_downloads(report: RepositoryReport, st) -> None:
+def _render_downloads(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示报告预览并提供 Markdown 和 JSON 下载。"""
     markdown = MarkdownRenderer().render(report)
     json_text = JsonRenderer().render(report)
@@ -460,8 +468,8 @@ def _render_downloads(report: RepositoryReport, st) -> None:
 def main() -> None:
     """启动 Streamlit 页面并处理仓库分析交互。"""
     try:
-        import streamlit as st
-    except ImportError as exc:
+        st = cast(StreamlitApi, import_module("streamlit"))
+    except ModuleNotFoundError as exc:
         raise SystemExit("缺少 Streamlit，请先执行：python.exe -m pip install -r requirements.txt") from exc
 
     st.set_page_config(page_title="RepoPath", layout="wide")

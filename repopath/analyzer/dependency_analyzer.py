@@ -2,22 +2,21 @@
 
 from collections import defaultdict
 
-from ..model.cpp import CppAnalysis
 from ..model.dependency import DependencyEdge, DependencyGraph, DependencyNode
-from ..model.python import PythonAnalysis
-from ..model.result import AnalysisResult, AnalysisState
+from ..core.context import AnalysisContext
+from ..model.result import AnalysisResult, AnalysisState, AnalyzerName
 from .base import Analyzer
 
 
 class DependencyAnalyzer(Analyzer):
     """合并 Python import 和 C++ include 并分析图结构。"""
 
-    name = "dependencies"
+    name = AnalyzerName.DEPENDENCIES
 
-    def analyze(self, context, state: AnalysisState) -> AnalysisResult:
+    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
         """生成跨语言依赖节点、边、循环和目录聚合结果。"""
-        python = state.get_data("python", PythonAnalysis())
-        cpp = state.get_data("cpp", CppAnalysis())
+        python = state.artifacts.python
+        cpp = state.artifacts.cpp
         graph = DependencyGraph()
         python_ids: dict[str, str] = {}
         cpp_ids: dict[str, str] = {}
@@ -84,7 +83,8 @@ class DependencyAnalyzer(Analyzer):
             for node_id in graph.nodes
             if graph.incoming_counts[node_id] == 0 and graph.outgoing_counts[node_id] == 0
         )
-        return AnalysisResult(name=self.name, data=graph)
+        state.artifacts.dependencies = graph
+        return AnalysisResult(name=self.name)
 
 
 def _directory(path: str) -> str:

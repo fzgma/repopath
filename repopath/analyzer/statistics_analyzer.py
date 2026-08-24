@@ -1,6 +1,7 @@
 """文件和代码统计分析器。"""
 
-from ..model.result import AnalysisResult, AnalysisState
+from ..core.context import AnalysisContext
+from ..model.result import AnalysisResult, AnalysisState, AnalyzerName
 from ..model.language import language_family
 from ..model.statistics import RepositoryStats
 from .base import Analyzer
@@ -9,11 +10,11 @@ from .base import Analyzer
 class StatisticsAnalyzer(Analyzer):
     """根据文件扫描结果统计语言、代码行数和主要目录。"""
 
-    name = "statistics"
+    name = AnalyzerName.STATISTICS
 
-    def analyze(self, context, state: AnalysisState) -> AnalysisResult:
+    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
         """汇总文件数量、非空行数、语言和目录分布。"""
-        files = state.get_data("files", [])
+        files = state.artifacts.files
         stats = RepositoryStats()
         for file in files:
             language = str(file.language)
@@ -27,4 +28,5 @@ class StatisticsAnalyzer(Analyzer):
             directory = relative.parts[0] if len(relative.parts) > 1 else "."
             stats.directory_counts[directory] += 1
             stats.directory_lines[directory] += file.non_empty_lines
-        return AnalysisResult(name=self.name, data=stats)
+        state.artifacts.stats = stats
+        return AnalysisResult(name=self.name)

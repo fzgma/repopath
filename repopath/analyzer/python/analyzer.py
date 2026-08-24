@@ -3,9 +3,10 @@
 import ast
 from pathlib import Path
 
+from ...core.context import AnalysisContext
 from ...model.language import Language
 from ...model.python import EntryPoint, ModuleSummary, PythonAnalysis
-from ...model.result import AnalysisResult, AnalysisState
+from ...model.result import AnalysisResult, AnalysisState, AnalyzerName
 from ...model.source import SourceDependency, SourceSymbol
 from ..base import Analyzer
 
@@ -43,7 +44,7 @@ def has_main_guard(tree: ast.Module) -> bool:
 
 def collect_symbols(tree: ast.Module, path: Path) -> list[SourceSymbol]:
     """提取 Python 中定义的函数和类。"""
-    symbols = []
+    symbols: list[SourceSymbol] = []
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             symbols.append(SourceSymbol(node.name, "function", path, node.lineno))
@@ -77,13 +78,13 @@ def collect_imports(tree: ast.Module, source_module: str) -> list[str]:
 class PythonAnalyzer(Analyzer):
     """分析 Python import、符号、入口和本地模块引用关系。"""
 
-    name = "python"
+    name = AnalyzerName.PYTHON
 
-    def analyze(self, context, state: AnalysisState) -> AnalysisResult:
+    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
         """从已扫描的 Python 文件中提取静态结构信息。"""
-        files = [file for file in state.get_data("files", []) if file.language == Language.PYTHON]
+        files = [file for file in state.artifacts.files if file.language == Language.PYTHON]
         analysis = PythonAnalysis()
-        warnings = []
+        warnings: list[str] = []
         local_modules = {module_name(file.path, context.repository.root): file for file in files}
         analysis.module_paths = {name: file.path for name, file in local_modules.items()}
 
@@ -123,4 +124,5 @@ class PythonAnalyzer(Analyzer):
             score = file.non_empty_lines + references * 12 + (20 if name in entry_modules else 0)
             analysis.core_modules.append(ModuleSummary(name, file.non_empty_lines, references, score))
         analysis.core_modules.sort(key=lambda item: (item.score, item.name), reverse=True)
-        return AnalysisResult(name=self.name, data=analysis, warnings=warnings)
+        state.artifacts.python = analysis
+        return AnalysisResult(name=self.name, warnings=warnings)

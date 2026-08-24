@@ -10,7 +10,7 @@ class JsonRenderer:
 
     def render(self, report: RepositoryReport) -> str:
         """生成包含所有主要分析结果的 JSON 文本。"""
-        payload = {
+        payload: dict[str, object] = {
             "schema_version": report.schema_version,
             "tool_version": report.tool_version,
             "generated_at": report.generated_at,
@@ -183,8 +183,13 @@ class JsonRenderer:
                 "authors": dict(report.git.authors),
                 "commits_by_month": dict(report.git.commits_by_month),
                 "recent_commits": [
-                    {"commit": commit, "author": author, "date": date, "subject": subject}
-                    for commit, author, date, subject in report.git.recent_commits
+                    {
+                        "commit": commit.identifier,
+                        "author": commit.author,
+                        "date": commit.date,
+                        "subject": commit.subject,
+                    }
+                    for commit in report.git.recent_commits
                 ],
                 "changed_paths": dict(report.git.changed_paths),
                 "first_commit_date": report.git.first_commit_date,

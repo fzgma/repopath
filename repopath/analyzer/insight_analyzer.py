@@ -1,7 +1,6 @@
 """核心模块评分和推荐阅读顺序分析器。"""
 
-from ..model.dependency import DependencyGraph
-from ..model.git import GitSummary
+from ..core.context import AnalysisContext
 from ..model.insight import (
     ModuleScore,
     ReadingPath,
@@ -9,20 +8,20 @@ from ..model.insight import (
     RepositoryInsights,
     RiskHotspot,
 )
-from ..model.result import AnalysisResult, AnalysisState
+from ..model.result import AnalysisResult, AnalysisState, AnalyzerName
 from .base import Analyzer
 
 
 class InsightAnalyzer(Analyzer):
     """根据依赖图、代码规模和 Git 热度生成阅读洞察。"""
 
-    name = "insights"
+    name = AnalyzerName.INSIGHTS
 
-    def analyze(self, context, state: AnalysisState) -> AnalysisResult:
+    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
         """计算模块评分、阅读顺序、入口路径和风险热点。"""
-        graph = state.get_data("dependencies", DependencyGraph())
-        git = state.get_data("git", GitSummary())
-        files = state.get_data("files", [])
+        graph = state.artifacts.dependencies
+        git = state.artifacts.git
+        files = state.artifacts.files
         lines_by_path = {
             context.repository.relative_path(file.path): file.non_empty_lines
             for file in files
@@ -103,7 +102,8 @@ class InsightAnalyzer(Analyzer):
                     )
                 )
         insights.hotspots.sort(key=lambda item: (-item.risk_score, item.path))
-        return AnalysisResult(name=self.name, data=insights)
+        state.artifacts.insights = insights
+        return AnalysisResult(name=self.name)
 
 
 def _recommendation_reasons(score: ModuleScore) -> tuple[str, ...]:

@@ -1,5 +1,6 @@
 """Provider 契约和 Pipeline 进度测试。"""
 
+from collections.abc import Iterator
 from pathlib import Path
 
 from repopath.analyzer.file_analyzer import FileAnalyzer
@@ -7,6 +8,7 @@ from repopath.core.context import AnalysisContext
 from repopath.core.pipeline import Pipeline
 from repopath.model.options import AnalysisOptions
 from repopath.model.repository import Repository, RepositorySource
+from repopath.model.result import AnalysisProgress
 from repopath.provider.git import GitProvider
 
 
@@ -17,7 +19,7 @@ class FakeFileProvider:
         """保存测试文件路径。"""
         self.path = path
 
-    def iter_files(self, excluded_paths: set[Path] | None = None):
+    def iter_files(self, excluded_paths: set[Path] | None = None) -> Iterator[Path]:
         """返回唯一的测试文件。"""
         yield self.path
 
@@ -37,11 +39,11 @@ def test_pipeline_accepts_provider_protocol_and_reports_progress(tmp_path: Path)
         git=GitProvider(repository),
         options=AnalysisOptions.for_profile("fast"),
     )
-    events = []
+    events: list[AnalysisProgress] = []
 
     state = Pipeline([FileAnalyzer()]).run(context, events.append)
 
-    assert len(state.get_data("files")) == 1
+    assert len(state.artifacts.files) == 1
     assert [event.status for event in events] == ["running", "finished"]
     assert events[-1].percent == 100
     assert state.durations["files"] >= 0

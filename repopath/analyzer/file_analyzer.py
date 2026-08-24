@@ -1,7 +1,8 @@
 """文件扫描分析器。"""
 
 from ..model.file import FileRecord
-from ..model.result import AnalysisResult, AnalysisState
+from ..core.context import AnalysisContext
+from ..model.result import AnalysisResult, AnalysisState, AnalyzerName
 from ..model.language import detect_language
 from .base import Analyzer
 
@@ -9,12 +10,12 @@ from .base import Analyzer
 class FileAnalyzer(Analyzer):
     """扫描文件并记录语言和代码规模。"""
 
-    name = "files"
+    name = AnalyzerName.FILES
 
-    def analyze(self, context, state: AnalysisState) -> AnalysisResult:
+    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
         """扫描仓库文件并生成文件记录列表。"""
-        records = []
-        warnings = []
+        records: list[FileRecord] = []
+        warnings: list[str] = []
         for path in context.filesystem.iter_files(context.excluded_paths):
             source = context.filesystem.read_text(path)
             if source is None:
@@ -33,4 +34,5 @@ class FileAnalyzer(Analyzer):
                     comment_lines=comment_lines,
                 )
             )
-        return AnalysisResult(name=self.name, data=records, warnings=warnings)
+        state.artifacts.files = records
+        return AnalysisResult(name=self.name, warnings=warnings)

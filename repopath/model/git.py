@@ -4,6 +4,16 @@ from collections import Counter
 from dataclasses import dataclass, field
 
 
+@dataclass(frozen=True)
+class GitCommit:
+    """记录最近一次提交的标识、作者、日期和摘要。"""
+
+    identifier: str
+    author: str
+    date: str
+    subject: str
+
+
 @dataclass
 class FileChangeStats:
     """保存单个文件在 Git 历史中的变更规模。"""
@@ -38,20 +48,20 @@ class GitSummary:
 
     available: bool = False
     commit_count: int = 0
-    authors: Counter[str] = field(default_factory=Counter)
-    recent_commits: list[tuple[str, str, str, str]] = field(default_factory=list)
-    changed_paths: Counter[str] = field(default_factory=Counter)
-    commits_by_month: Counter[str] = field(default_factory=Counter)
+    authors: Counter[str] = field(default_factory=Counter[str])
+    recent_commits: list[GitCommit] = field(default_factory=list[GitCommit])
+    changed_paths: Counter[str] = field(default_factory=Counter[str])
+    commits_by_month: Counter[str] = field(default_factory=Counter[str])
     first_commit_date: str | None = None
     last_commit_date: str | None = None
-    file_changes: dict[str, FileChangeStats] = field(default_factory=dict)
-    monthly_changes: dict[str, MonthlyChangeStats] = field(default_factory=dict)
-    recent_30_days: Counter[str] = field(default_factory=Counter)
-    recent_90_days: Counter[str] = field(default_factory=Counter)
-    co_changes: Counter[tuple[str, str]] = field(default_factory=Counter)
-    directory_authors: dict[str, Counter[str]] = field(default_factory=dict)
-    active_paths: list[str] = field(default_factory=list)
-    stable_paths: list[str] = field(default_factory=list)
+    file_changes: dict[str, FileChangeStats] = field(default_factory=dict[str, FileChangeStats])
+    monthly_changes: dict[str, MonthlyChangeStats] = field(default_factory=dict[str, MonthlyChangeStats])
+    recent_30_days: Counter[str] = field(default_factory=Counter[str])
+    recent_90_days: Counter[str] = field(default_factory=Counter[str])
+    co_changes: Counter[tuple[str, str]] = field(default_factory=Counter[tuple[str, str]])
+    directory_authors: dict[str, Counter[str]] = field(default_factory=dict[str, Counter[str]])
+    active_paths: list[str] = field(default_factory=list[str])
+    stable_paths: list[str] = field(default_factory=list[str])
     shallow: bool = False
     history_period: str = "all"
     error: str | None = None

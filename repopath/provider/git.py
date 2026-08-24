@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 from datetime import date, timedelta
 from itertools import combinations
 
-from ..model.git import FileChangeStats, GitSummary, MonthlyChangeStats
+from ..model.git import FileChangeStats, GitCommit, GitSummary, MonthlyChangeStats
 from ..model.repository import Repository
 
 
@@ -64,22 +64,22 @@ class GitProvider:
         except RuntimeError as exc:
             return GitSummary(error=str(exc))
 
-        recent_commits: list[tuple[str, str, str, str]] = []
+        recent_commits: list[GitCommit] = []
         for row in commit_rows:
             fields = row.split("\t", 3)
             if len(fields) == 4:
-                recent_commits.append(tuple(fields))
+                recent_commits.append(GitCommit(fields[0], fields[1], fields[2], fields[3]))
 
         commits = _parse_numstat_history(history_rows)
-        authors: Counter[str] = Counter()
-        changed_paths: Counter[str] = Counter()
-        commits_by_month: Counter[str] = Counter()
+        authors: Counter[str] = Counter[str]()
+        changed_paths: Counter[str] = Counter[str]()
+        commits_by_month: Counter[str] = Counter[str]()
         file_changes: dict[str, FileChangeStats] = {}
         monthly_changes: dict[str, MonthlyChangeStats] = {}
-        recent_30_days: Counter[str] = Counter()
-        recent_90_days: Counter[str] = Counter()
-        co_changes: Counter[tuple[str, str]] = Counter()
-        directory_authors: dict[str, Counter[str]] = defaultdict(Counter)
+        recent_30_days: Counter[str] = Counter[str]()
+        recent_90_days: Counter[str] = Counter[str]()
+        co_changes: Counter[tuple[str, str]] = Counter[tuple[str, str]]()
+        directory_authors: defaultdict[str, Counter[str]] = defaultdict(Counter[str])
         today = date.today()
 
         for commit_date, author, files in commits:

@@ -62,7 +62,7 @@ class RiskHotspot:
 class RepositoryInsights:
     """保存统一核心评分、阅读顺序和风险热点。"""
 
-    module_scores: list[ModuleScore] = field(default_factory=list)
-    reading_order: list[ReadingRecommendation] = field(default_factory=list)
-    reading_paths: list[ReadingPath] = field(default_factory=list)
-    hotspots: list[RiskHotspot] = field(default_factory=list)
+    module_scores: list[ModuleScore] = field(default_factory=list[ModuleScore])
+    reading_order: list[ReadingRecommendation] = field(default_factory=list[ReadingRecommendation])
+    reading_paths: list[ReadingPath] = field(default_factory=list[ReadingPath])
+    hotspots: list[RiskHotspot] = field(default_factory=list[RiskHotspot])

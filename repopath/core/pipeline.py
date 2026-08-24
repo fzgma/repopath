@@ -13,7 +13,7 @@ from ..analyzer.statistics_analyzer import StatisticsAnalyzer
 from ..analyzer.dependency_analyzer import DependencyAnalyzer
 from ..analyzer.insight_analyzer import InsightAnalyzer
 from ..model.options import AnalysisOptions
-from ..model.result import AnalysisProgress, AnalysisResult, AnalysisState
+from ..model.result import AnalysisProgress, AnalysisResult, AnalysisState, AnalysisStatus
 from .context import AnalysisContext
 
 
@@ -37,7 +37,7 @@ class Pipeline:
         total = len(analyzers)
         for index, analyzer in enumerate(analyzers, start=1):
             if progress_callback:
-                progress_callback(AnalysisProgress(analyzer.name, index, total, int((index - 1) / total * 100), "running"))
+                progress_callback(AnalysisProgress(analyzer.name, index, total, int((index - 1) / total * 100), AnalysisStatus.RUNNING))
             started_at = perf_counter()
             try:
                 result = analyzer.analyze(context, state)
@@ -46,7 +46,7 @@ class Pipeline:
             result.duration_seconds = round(perf_counter() - started_at, 6)
             state.add(result)
             if progress_callback:
-                progress_callback(AnalysisProgress(analyzer.name, index, total, int(index / total * 100), "finished"))
+                progress_callback(AnalysisProgress(analyzer.name, index, total, int(index / total * 100), AnalysisStatus.FINISHED))
         return state
 
 

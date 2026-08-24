@@ -23,14 +23,14 @@ class RepositoryReport:
     tool_version: str = "0.3.0"
     generated_at: str = ""
     options: AnalysisOptions = field(default_factory=AnalysisOptions)
-    files: list[FileRecord] = field(default_factory=list)
+    files: list[FileRecord] = field(default_factory=list[FileRecord])
     stats: RepositoryStats = field(default_factory=RepositoryStats)
     python: PythonAnalysis = field(default_factory=PythonAnalysis)
     cpp: CppAnalysis = field(default_factory=CppAnalysis)
     git: GitSummary = field(default_factory=GitSummary)
     dependencies: DependencyGraph = field(default_factory=DependencyGraph)
     insights: RepositoryInsights = field(default_factory=RepositoryInsights)
-    analyzer_durations: dict[str, float] = field(default_factory=dict)
+    analyzer_durations: dict[str, float] = field(default_factory=dict[str, float])
     elapsed_seconds: float = 0.0
-    warnings: list[str] = field(default_factory=list)
-    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list[str])
+    errors: list[str] = field(default_factory=list[str])

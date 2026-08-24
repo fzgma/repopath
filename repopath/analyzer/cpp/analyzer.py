@@ -3,9 +3,10 @@
 import re
 from pathlib import Path
 
+from ...core.context import AnalysisContext
 from ...model.cpp import CppAnalysis, CppFileAnalysis
 from ...model.language import Language
-from ...model.result import AnalysisResult, AnalysisState
+from ...model.result import AnalysisResult, AnalysisState, AnalyzerName
 from ...model.source import SourceDependency, SourceSymbol
 from ..base import Analyzer
 
@@ -27,17 +28,17 @@ def line_number(source: str, offset: int) -> int:
 class CppAnalyzer(Analyzer):
     """分析 C++ include、函数、类、结构体、命名空间和 main 入口。"""
 
-    name = "cpp"
+    name = AnalyzerName.CPP
 
-    def analyze(self, context, state: AnalysisState) -> AnalysisResult:
+    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
         """从 C++ 源文件和头文件中提取基础静态结构。"""
         files = [
             file
-            for file in state.get_data("files", [])
+            for file in state.artifacts.files
             if file.language in {Language.CPP, Language.CPP_HEADER}
         ]
         analysis = CppAnalysis()
-        warnings = []
+        warnings: list[str] = []
         local_paths = {
             context.repository.relative_path(file.path): file.path
             for file in files
@@ -74,4 +75,5 @@ class CppAnalyzer(Analyzer):
                     analysis.dependencies.append(
                         SourceDependency(source_name, context.repository.relative_path(target_path), "include")
                     )
-        return AnalysisResult(name=self.name, data=analysis, warnings=warnings)
+        state.artifacts.cpp = analysis
+        return AnalysisResult(name=self.name, warnings=warnings)

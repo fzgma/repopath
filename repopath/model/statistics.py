@@ -8,13 +8,13 @@ from dataclasses import dataclass, field
 class RepositoryStats:
     """保存语言、代码行数和主要目录统计。"""
 
-    language_counts: Counter[str] = field(default_factory=Counter)
-    language_lines: Counter[str] = field(default_factory=Counter)
-    language_comment_lines: Counter[str] = field(default_factory=Counter)
-    language_family_counts: Counter[str] = field(default_factory=Counter)
-    language_family_lines: Counter[str] = field(default_factory=Counter)
-    directory_counts: Counter[str] = field(default_factory=Counter)
-    directory_lines: Counter[str] = field(default_factory=Counter)
+    language_counts: Counter[str] = field(default_factory=Counter[str])
+    language_lines: Counter[str] = field(default_factory=Counter[str])
+    language_comment_lines: Counter[str] = field(default_factory=Counter[str])
+    language_family_counts: Counter[str] = field(default_factory=Counter[str])
+    language_family_lines: Counter[str] = field(default_factory=Counter[str])
+    directory_counts: Counter[str] = field(default_factory=Counter[str])
+    directory_lines: Counter[str] = field(default_factory=Counter[str])
 
     @property
     def total_non_empty_lines(self) -> int:

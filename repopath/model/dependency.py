@@ -28,15 +28,15 @@ class DependencyEdge:
 class DependencyGraph:
     """保存跨语言依赖节点、边和结构分析结果。"""
 
-    nodes: dict[str, DependencyNode] = field(default_factory=dict)
-    directory_nodes: dict[str, DependencyNode] = field(default_factory=dict)
-    edges: list[DependencyEdge] = field(default_factory=list)
-    incoming_counts: Counter[str] = field(default_factory=Counter)
-    outgoing_counts: Counter[str] = field(default_factory=Counter)
-    cycles: list[list[str]] = field(default_factory=list)
-    isolated_nodes: list[str] = field(default_factory=list)
-    directory_edges: Counter[tuple[str, str]] = field(default_factory=Counter)
-    entry_nodes: list[str] = field(default_factory=list)
+    nodes: dict[str, DependencyNode] = field(default_factory=dict[str, DependencyNode])
+    directory_nodes: dict[str, DependencyNode] = field(default_factory=dict[str, DependencyNode])
+    edges: list[DependencyEdge] = field(default_factory=list[DependencyEdge])
+    incoming_counts: Counter[str] = field(default_factory=Counter[str])
+    outgoing_counts: Counter[str] = field(default_factory=Counter[str])
+    cycles: list[list[str]] = field(default_factory=list[list[str]])
+    isolated_nodes: list[str] = field(default_factory=list[str])
+    directory_edges: Counter[tuple[str, str]] = field(default_factory=Counter[tuple[str, str]])
+    entry_nodes: list[str] = field(default_factory=list[str])
 
     def dependencies_of(self, node_id: str) -> list[str]:
         """返回指定节点直接依赖的节点列表。"""

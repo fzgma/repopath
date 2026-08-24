@@ -1,9 +1,9 @@
 """Analyzer 基础协议。"""
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
-from ..model.result import AnalysisResult, AnalysisState
+from ..model.result import AnalysisResult, AnalysisState, AnalyzerName
 
 if TYPE_CHECKING:
     from ..core.context import AnalysisContext
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 class Analyzer(ABC):
     """定义可被 Core Pipeline 调度的分析器接口。"""
 
-    name = "analyzer"
+    name: ClassVar[AnalyzerName]
 
     @abstractmethod
     def analyze(self, context: "AnalysisContext", state: AnalysisState) -> AnalysisResult:

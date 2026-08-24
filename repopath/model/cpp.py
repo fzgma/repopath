@@ -12,20 +12,20 @@ class CppFileAnalysis:
     """保存单个 C++ 文件的 include 和符号信息。"""
 
     path: Path
-    includes: list[str] = field(default_factory=list)
-    functions: list[SourceSymbol] = field(default_factory=list)
-    types: list[SourceSymbol] = field(default_factory=list)
-    namespaces: list[SourceSymbol] = field(default_factory=list)
+    includes: list[str] = field(default_factory=list[str])
+    functions: list[SourceSymbol] = field(default_factory=list[SourceSymbol])
+    types: list[SourceSymbol] = field(default_factory=list[SourceSymbol])
+    namespaces: list[SourceSymbol] = field(default_factory=list[SourceSymbol])
 
 
 @dataclass
 class CppAnalysis:
     """保存 C++ include、符号、入口和本地依赖分析结果。"""
 
-    files: dict[Path, CppFileAnalysis] = field(default_factory=dict)
-    include_counts: Counter[str] = field(default_factory=Counter)
-    entry_points: list[SourceSymbol] = field(default_factory=list)
-    dependencies: list[SourceDependency] = field(default_factory=list)
+    files: dict[Path, CppFileAnalysis] = field(default_factory=dict[Path, CppFileAnalysis])
+    include_counts: Counter[str] = field(default_factory=Counter[str])
+    entry_points: list[SourceSymbol] = field(default_factory=list[SourceSymbol])
+    dependencies: list[SourceDependency] = field(default_factory=list[SourceDependency])
 
     @property
     def function_count(self) -> int:

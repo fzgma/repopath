@@ -194,8 +194,10 @@ class MarkdownRenderer:
             for author, count in git.authors.most_common(10):
                 lines.append(f"| {markdown_cell(author)} | {count} |")
             lines.extend(["", "### 最近提交", "", "| 提交 | 作者 | 日期 | 摘要 |", "| --- | --- | --- | --- |"])
-            for commit, author, date, subject in git.recent_commits:
-                lines.append(f"| `{markdown_cell(commit)}` | {markdown_cell(author)} | {date} | {markdown_cell(subject)} |")
+            for commit in git.recent_commits:
+                lines.append(
+                    f"| `{markdown_cell(commit.identifier)}` | {markdown_cell(commit.author)} | {commit.date} | {markdown_cell(commit.subject)} |"
+                )
             lines.extend(["", "### 高频修改路径", "", "| 路径 | 修改次数 |", "| --- | ---: |"])
             for path, count in git.changed_paths.most_common(15):
                 lines.append(f"| `{markdown_cell(path)}` | {count} |")

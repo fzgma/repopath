@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import tomllib
+from typing import cast
 
 from ..model.options import AnalysisOptions
 
@@ -66,7 +67,7 @@ def _section(payload: dict[str, object], name: str) -> dict[str, object]:
     value = payload.get(name, {})
     if not isinstance(value, dict):
         raise AnalysisConfigError(f"配置项 [{name}] 必须是 TOML 表")
-    return value
+    return cast(dict[str, object], value)
 
 
 def _optional_bool(section: dict[str, object], key: str) -> bool | None:
@@ -94,6 +95,11 @@ def _optional_strings(section: dict[str, object], key: str) -> tuple[str, ...] |
     if key not in section:
         return None
     value = section[key]
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+    if not isinstance(value, list):
         raise TypeError(f"{key} 必须是字符串数组")
-    return tuple(value)
+    strings: list[str] = []
+    for item in cast(list[object], value):
+        if not isinstance(item, str):
+            raise TypeError(f"{key} 必须是字符串数组")
+        strings.append(item)
+    return tuple(strings)
