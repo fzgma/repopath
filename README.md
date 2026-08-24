@@ -49,13 +49,14 @@ RepoPath 使用 Python 编写。输入本地仓库目录后，工具会扫描文
 
 - 输出 Markdown 报告，便于阅读和提交到其他工具
 - 输出 JSON 报告，便于后续处理和集成
-- 提供 Streamlit 图表，在同一条 Pipeline 上查看概览、阅读路线、依赖、Python、C++ 和 Git 演进
-- 支持快速、标准和深度分析模式，以及 Markdown/JSON 下载
+- 提供 Streamlit 仓库阅读工作台，在同一条 Pipeline 上查看概览、阅读路线、依赖、Python、C++、Git 和报告
+- 支持快速、标准和深度分析模式、Pipeline 阶段进度、失败建议，以及 Markdown/JSON 完整报告下载
+- 支持按语言、目录、关键词筛选并排序阅读路线、依赖边和 Git 热点；可选择模块查看评分、推荐原因和双向依赖
 
 ## 二、项目结构
 
 ```text
-app.py                      # Streamlit 页面
+app.py                      # Streamlit 根目录入口和依赖注入
 repopath.py                 # 根目录 CLI 兼容启动脚本
 run_streamlit.py            # Streamlit bootstrap 启动脚本
 repopath/
@@ -67,11 +68,12 @@ repopath/
     dependency_analyzer.py  # 统一依赖图
     insight_analyzer.py     # 评分、阅读路线和风险热点
   core/                     # Context、Pipeline、Composer 和分析服务
-  interface/                # 命令行入口
+  interface/
+    cli.py                  # 命令行入口
+    ui/                     # Streamlit 表单、会话状态和报告视图
   model/                    # 仓库、依赖、洞察和报告模型
   provider/                 # 文件系统和 Git 数据来源
   renderer/                 # Markdown 和 JSON 输出
-  ui/                       # 后续 Streamlit 组件拆分目录
 tests/                      # Analyzer、依赖图、配置、Git、UI 和混合仓库测试
 requirements.txt            # Streamlit UI 依赖
 requirements-dev.txt        # 测试依赖
@@ -80,18 +82,16 @@ requirements-dev.txt        # 测试依赖
 分析数据流如下：
 
 ```text
-RepositorySource -> Provider -> Analyzer -> AnalysisResult
-                                             |
-                                             v
-                         DependencyGraph + RepositoryInsights
-                                             |
-                                             v
-                              Composer -> RepositoryReport
-                                              |       |
-                                             UI    Renderer
+RepositorySource -> Provider -> Analyzer Pipeline
+                                     |
+                                     v
+                    AnalysisResult + AnalysisArtifacts
+                                     |
+                                     v
+          Composer -> RepositoryReport -> UI / Renderer
 ```
 
-`Provider` 读取原始数据，`Analyzer` 只负责分析，`Composer` 合并统一报告，`Interface` 和 `Renderer` 分别负责交互与输出。CLI 和 UI 共用同一条 Core Pipeline。
+`Provider` 读取原始数据，`Analyzer` 只负责分析，`AnalysisResult` 保存执行元数据，`AnalysisArtifacts` 保存具名领域产物，`Composer` 合并统一报告。CLI 和 UI 共用同一条 Core Pipeline；UI 不直接导入 Analyzer、Provider 或 Git 命令实现。
 
 ## 三、安装与运行
 
@@ -197,7 +197,17 @@ limit = 50
 python.exe run_streamlit.py
 ```
 
-`run_streamlit.py` 会找到根目录的 `app.py`，并通过 Streamlit bootstrap 启动。启动完成后终端会显示本地访问地址，默认通常为 `http://localhost:8501`。
+`run_streamlit.py` 会找到根目录的 `app.py`，并通过 Streamlit bootstrap 启动。启动完成后终端会显示实际本地访问地址。
+
+页面提供三个分析模式：
+
+| 模式 | 执行内容 | 适用场景 |
+| --- | --- | --- |
+| 快速 | 文件扫描、语言识别、代码规模和目录统计 | 先确认仓库范围 |
+| 标准 | 快速模式加 Python AST、C++ 基础结构和 Git 历史统计 | 了解代码组成和演进 |
+| 深度 | 全部 Analyzer，包含依赖图、评分、阅读路线和 Git 热点 | 进行完整代码阅读 |
+
+页面会先读取目标目录 `.repopath.toml` 的模式和高级配置，再应用用户在页面中选择的模式与高级参数。UI 覆盖顺序为：内置默认值 < `.repopath.toml` < 已选择模式 < UI 高级配置。高级配置可设置 Git 历史时间范围、单文件读取上限和页面结果数量；页面截断只影响视图，Markdown 和 JSON 下载始终保留完整 `RepositoryReport`。
 
 ## 四、使用方式
 
@@ -217,8 +227,12 @@ python.exe -m repopath D:\code\sample-project -o D:\reports\sample-project.md
 
 1. 启动 `run_streamlit.py`。
 2. 在页面中输入本地仓库路径。
-3. 点击“分析仓库”。
-4. 在概览、推荐阅读、依赖关系、Python、C++、Git 和报告页签中查看结果。
+3. 选择快速、标准或深度模式；需要时在“高级配置”调整 Git 时间范围、最大文件大小和页面结果数量。
+4. 点击“分析仓库”，页面按 Pipeline 阶段显示进度；重新分析会清理上一份报告，失败时展示可执行的处理建议和原始错误详情。
+5. 在概览、推荐阅读、依赖关系、Python、C++、Git 和报告页签中查看结果；可按语言、目录和路径筛选并排序阅读路线、依赖边和 Git 热点。
+6. 在推荐阅读页选择模块，可联动查看核心评分、推荐原因、正向依赖和反向依赖；在报告页下载完整 Markdown 或 JSON。
+
+页面会在关键概念处提供帮助说明：核心评分综合规模、依赖、入口可达性和 Git 修改热度；风险热点结合依赖重要性与修改热度；Churn 是历史新增和删除行数总和；循环依赖表示模块间的闭环关系。小型依赖图显示为 Graphviz；大型依赖图切换为目录聚合和可筛选的边表。
 
 ## 五、报告内容
 
@@ -239,13 +253,19 @@ JSON 报告提供对应的结构化数据，适合后续脚本处理或接入其
 
 ## 六、测试
 
-项目使用 pytest，覆盖 Python AST、C++、统一依赖图、阅读洞察、TOML 配置、Git 演进、Provider 契约、Streamlit 边界和混合仓库报告。
+项目使用 pytest，覆盖 Python AST、C++、统一依赖图、阅读洞察、TOML 配置、Git 演进、Provider 契约、CLI 参数、Streamlit 页面、UI 会话状态、预设矩阵和 UI 依赖边界。
 
 ```powershell
 python.exe -m pytest -q
 ```
 
 GitHub Actions 会在 Python 3.11 至 3.14 上运行测试。
+
+开发时可额外运行 Pyright：
+
+```powershell
+python.exe -m pyright
+```
 
 ## 七、当前限制
 
@@ -257,6 +277,8 @@ GitHub Actions 会在 Python 3.11 至 3.14 上运行测试。
 6. Git 热点受提交粒度、历史完整性、重命名和浅克隆影响；Git 不可用时该部分会缺失。
 7. 文件共同修改统计将单次提交最多前 50 个路径用于组合，避免超大提交产生二次方开销。
 8. 大型仓库的扫描时间与可读取文件数量、文件大小和 Git 历史长度相关。
+9. Streamlit 页面当前使用同步分析；不提供后台任务、自动刷新或中断按钮。
+10. UI 只开放本地目录输入；GitHub API、认证、缓存和 API 限流尚未实现。
 
 ## 八、开源许可
 
