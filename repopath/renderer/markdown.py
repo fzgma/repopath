@@ -114,6 +114,7 @@ class MarkdownRenderer:
 
         graph = report.dependencies
         limit = report.options.result_limit
+        reading_limit = report.options.reading_limit
         lines.extend(["", "## 统一依赖图", ""])
         if graph.nodes:
             lines.extend([
@@ -147,7 +148,7 @@ class MarkdownRenderer:
         lines.extend(["", "## 推荐阅读顺序", ""])
         if insights.reading_order:
             lines.extend(["| 排名 | 文件 | 语言 | 总分 | 入口距离 | 推荐原因 |", "| ---: | --- | --- | ---: | ---: | --- |"])
-            for item in insights.reading_order[:limit]:
+            for item in insights.reading_order[:reading_limit]:
                 distance = item.entry_distance if item.entry_distance is not None else "不可达"
                 lines.append(
                     f"| {item.rank} | `{markdown_cell(item.path)}` | {item.language} | {item.score:.2f} | {distance} | {markdown_cell('；'.join(item.reasons))} |"
@@ -155,17 +156,29 @@ class MarkdownRenderer:
         else:
             lines.append("当前配置未生成推荐阅读顺序。")
 
-        lines.extend(["", "## 核心模块评分", ""])
+        lines.extend([
+            "",
+            "## 核心模块评分",
+            "",
+            "> 规模分最高 20 分，按每 25 行非空代码计 1 分；依赖分最高 35 分，按每个入边 7 分和每个出边 2 分计算；入口分最高 20 分，入口为 20 分且每远离入口一层减 4 分；Git 分最高 25 分，按历史修改和近 90 天修改次数计算。",
+            "",
+        ])
         if insights.module_scores:
             lines.extend(["| 文件 | 规模 | 依赖 | 入口 | Git | 总分 |", "| --- | ---: | ---: | ---: | ---: | ---: |"])
-            for item in sorted(insights.module_scores, key=lambda score: (-score.total_score, score.path))[:limit]:
+            for item in sorted(insights.module_scores, key=lambda score: (-score.total_score, score.path))[:reading_limit]:
                 lines.append(
                     f"| `{markdown_cell(item.path)}` | {item.size_score:.2f} | {item.dependency_score:.2f} | {item.entry_score:.2f} | {item.git_score:.2f} | {item.total_score:.2f} |"
                 )
         else:
             lines.append("暂无核心模块评分。")
 
-        lines.extend(["", "## 风险热点", ""])
+        lines.extend([
+            "",
+            "## 风险热点",
+            "",
+            "> 风险分等于依赖分加 Git 分，仅列出同时具有依赖关系和 Git 修改记录的模块。",
+            "",
+        ])
         if insights.hotspots:
             lines.extend(["| 文件 | 语言 | 依赖分 | 修改次数 | 风险分 |", "| --- | --- | ---: | ---: | ---: |"])
             for item in insights.hotspots[:limit]:
@@ -229,9 +242,10 @@ class MarkdownRenderer:
         for name, duration in report.analyzer_durations.items():
             lines.append(f"| `{markdown_cell(name)}` | {duration:.6f} |")
 
-        lines.extend(["", "## 文件清单", "", "| 文件 | 语言 | 非空行 |", "| --- | --- | ---: |"])
-        for file in sorted(files, key=lambda item: (item.non_empty_lines, str(item.path)), reverse=True):
-            lines.append(f"| `{markdown_cell(repository.relative_path(file.path))}` | {markdown_cell(file.language)} | {file.non_empty_lines} |")
+        if report.options.include_file_list:
+            lines.extend(["", "## 文件清单", "", "| 文件 | 语言 | 非空行 |", "| --- | --- | ---: |"])
+            for file in sorted(files, key=lambda item: (item.non_empty_lines, str(item.path)), reverse=True):
+                lines.append(f"| `{markdown_cell(repository.relative_path(file.path))}` | {markdown_cell(file.language)} | {file.non_empty_lines} |")
         return "\n".join(lines) + "\n"
 
     @staticmethod

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from repopath.core.config import AnalysisConfigError, load_analysis_options
+from repopath.core.config import AnalysisConfigError, ensure_default_config, load_analysis_options
 from repopath.core.service import analyze_repository
 
 
@@ -26,6 +26,8 @@ period = "90"
 
 [report]
 limit = 25
+reading_limit = 8
+include_file_list = true
 """.strip(),
         encoding="utf-8",
     )
@@ -38,6 +40,29 @@ limit = 25
     assert options.cpp_enabled is False
     assert options.git_period == "90"
     assert options.result_limit == 25
+    assert options.reading_limit == 8
+    assert options.include_file_list is True
+
+
+def test_ensure_default_config_creates_a_readable_template(tmp_path: Path) -> None:
+    """验证默认配置文件会被创建并能立即读取。"""
+    path = ensure_default_config(tmp_path)
+
+    assert path == tmp_path / ".repopath.toml"
+    assert "reading_limit = 10" in path.read_text(encoding="utf-8")
+    assert load_analysis_options(tmp_path).include_file_list is False
+
+
+def test_default_config_keeps_profile_analyzer_matrix_in_control(tmp_path: Path) -> None:
+    """验证默认模板不会用显式 Analyzer 开关覆盖 profile。"""
+    path = ensure_default_config(tmp_path)
+    path.write_text(path.read_text(encoding="utf-8").replace('profile = "deep"', 'profile = "fast"'), encoding="utf-8")
+
+    options = load_analysis_options(tmp_path)
+
+    assert options.profile == "fast"
+    assert options.python_enabled is False
+    assert options.dependencies_enabled is False
 
 
 def test_invalid_toml_config_reports_a_config_error(tmp_path: Path) -> None:

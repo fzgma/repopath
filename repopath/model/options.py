@@ -20,6 +20,8 @@ class AnalysisOptions:
     max_file_size: int | None = 2 * 1024 * 1024
     follow_symlinks: bool = False
     result_limit: int = 50
+    reading_limit: int = 10
+    include_file_list: bool = False
     git_period: str = "all"
     excluded_patterns: tuple[str, ...] = ()
 
@@ -58,6 +60,8 @@ class AnalysisOptions:
             raise ValueError("最大文件大小必须大于 0")
         if self.result_limit <= 0:
             raise ValueError("报告列表最大数量必须大于 0")
+        if self.reading_limit <= 0:
+            raise ValueError("阅读和评分列表最大数量必须大于 0")
         if self.dependencies_enabled and not (self.python_enabled or self.cpp_enabled):
             raise ValueError("依赖分析至少需要启用 Python 或 C++ Analyzer")
         if self.insights_enabled and not self.dependencies_enabled:

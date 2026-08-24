@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 from ..core.service import analyze_repository
-from ..core.config import AnalysisConfigError, load_analysis_options
+from ..core.config import AnalysisConfigError, ensure_default_config, load_analysis_options
 from ..model.options import AnalysisOptions
 from ..model.repository import Repository
 from ..renderer.json import JsonRenderer
@@ -23,6 +23,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-file-size", type=int, help="可读取文本文件的最大字节数")
     parser.add_argument("--git-period", choices=("all", "30", "90"), help="Git 历史时间范围")
     parser.add_argument("--result-limit", type=int, help="Markdown 报告每类列表最大数量")
+    parser.add_argument("--reading-limit", type=int, help="推荐阅读和评分明细最大数量")
+    parser.add_argument("--include-file-list", dest="include_file_list", action="store_true", default=None, help="在 Markdown 报告中包含文件清单")
     parser.add_argument("--no-python", dest="python_enabled", action="store_false", default=None, help="关闭 Python Analyzer")
     parser.add_argument("--no-cpp", dest="cpp_enabled", action="store_false", default=None, help="关闭 C++ Analyzer")
     parser.add_argument("--no-git", dest="git_enabled", action="store_false", default=None, help="关闭 Git Analyzer")
@@ -48,6 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.format == "json" and args.output == "REPOPATH_REPORT.md":
         output = repository.root / "REPOPATH_REPORT.json"
     try:
+        if args.config is None:
+            ensure_default_config(repository.root)
         options = _resolve_options(repository.root, args)
     except AnalysisConfigError as exc:
         parser.error(str(exc))
@@ -89,6 +93,8 @@ def _resolve_options(root: Path, args: argparse.Namespace) -> AnalysisOptions:
             max_file_size=args.max_file_size,
             git_period=args.git_period,
             result_limit=args.result_limit,
+            reading_limit=args.reading_limit,
+            include_file_list=args.include_file_list,
             python_enabled=python_enabled,
             cpp_enabled=cpp_enabled,
             git_enabled=args.git_enabled,

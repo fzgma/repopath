@@ -7,8 +7,55 @@ from typing import cast
 from ..model.options import AnalysisOptions
 
 
+DEFAULT_CONFIG_NAME = ".repopath.toml"
+DEFAULT_CONFIG_TEXT = """# RepoPath 仓库分析配置
+
+[scan]
+profile = "deep"
+max_file_size = 2097152
+follow_symlinks = false
+exclude = []
+
+[analyzers]
+# 可选：显式覆盖 profile 中的单项开关，例如：
+# python = false
+# cpp = false
+# git = false
+# dependencies = false
+# insights = false
+
+[git]
+period = "all"
+
+[report]
+limit = 50
+reading_limit = 10
+include_file_list = false
+"""
+
+
 class AnalysisConfigError(ValueError):
     """表示仓库分析配置无法读取或校验。"""
+
+
+def config_path_for(root: Path, config_path: str | Path | None = None) -> Path:
+    """解析仓库配置文件的绝对路径。"""
+    if config_path:
+        candidate = Path(config_path).expanduser()
+        return (candidate if candidate.is_absolute() else root / candidate).resolve()
+    return root / DEFAULT_CONFIG_NAME
+
+
+def ensure_default_config(root: Path) -> Path:
+    """在仓库根目录缺少配置时创建默认 TOML 文件。"""
+    path = config_path_for(root)
+    if path.exists():
+        return path
+    try:
+        path.write_text(DEFAULT_CONFIG_TEXT, encoding="utf-8")
+    except OSError as exc:
+        raise AnalysisConfigError(f"无法创建默认配置文件 {path}：{exc}") from exc
+    return path
 
 
 def load_analysis_options(
@@ -16,11 +63,7 @@ def load_analysis_options(
     config_path: str | Path | None = None,
 ) -> AnalysisOptions:
     """从仓库配置文件加载分析选项。"""
-    if config_path:
-        candidate = Path(config_path).expanduser()
-        path = (candidate if candidate.is_absolute() else root / candidate).resolve()
-    else:
-        path = root / ".repopath.toml"
+    path = config_path_for(root, config_path)
     if not path.exists():
         return AnalysisOptions()
     try:
@@ -56,6 +99,8 @@ def load_analysis_options(
             insights_enabled=insights_enabled,
             git_period=str(git["period"]) if "period" in git else None,
             result_limit=_optional_int(report, "limit"),
+            reading_limit=_optional_int(report, "reading_limit"),
+            include_file_list=_optional_bool(report, "include_file_list"),
         )
     except (TypeError, ValueError) as exc:
         raise AnalysisConfigError(f"配置文件 {path} 无效：{exc}") from exc

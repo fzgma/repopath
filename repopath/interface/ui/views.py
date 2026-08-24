@@ -96,7 +96,7 @@ def _render_overview(report: RepositoryReport, st: StreamlitApi) -> None:
             st.dataframe(directory_rows, width="stretch", hide_index=True)
         else:
             st.info("没有可展示的目录统计。")
-    st.subheader("结构热点", help="风险热点同时考虑模块依赖重要性和 Git 修改热度。")
+    st.subheader("结构热点", help="风险分等于依赖分加 Git 分；仅展示同时有依赖关系和 Git 修改记录的模块。")
     scores = {item.node_id: item for item in report.insights.module_scores}
     rows: list[Row] = [{"路径": item.path, "语言": item.language, "依赖分": item.dependency_score, "Git 修改": item.git_changes, "代码行": scores[item.node_id].lines if item.node_id in scores else 0, "风险分": item.risk_score} for item in report.insights.hotspots[:report.options.result_limit]]
     if rows:
@@ -113,6 +113,7 @@ def _render_overview(report: RepositoryReport, st: StreamlitApi) -> None:
 def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示筛选后的阅读路线、评分明细和模块详情。"""
     all_items = report.insights.reading_order
+    reading_limit = report.options.reading_limit
     filters = st.columns(4)
     with filters[0]:
         language = st.selectbox("阅读语言", ["全部", *sorted({item.language for item in all_items})], key="reading_language")
@@ -125,21 +126,21 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
     items = [item for item in all_items if (language == "全部" or item.language == language) and (directory == "全部" or _top_directory(item.path) == directory) and (not keyword or keyword.lower() in item.path.lower())]
     if sort_by == "核心评分":
         items = sorted(items, key=lambda item: (-item.score, item.path))
-    _caption_count(st, len(items), len(all_items), report.options.result_limit)
+    _caption_count(st, len(items), len(all_items), reading_limit)
     if not items:
         st.info("当前配置未生成推荐阅读顺序。")
         return
-    visible = items[:report.options.result_limit]
+    visible = items[:reading_limit]
     rows: list[Row] = [{"排名": item.rank, "路径": item.path, "语言": item.language, "总分": item.score, "入口距离": str(item.entry_distance) if item.entry_distance is not None else "不可达", "推荐原因": "；".join(item.reasons)} for item in visible]
     st.dataframe(rows, width="stretch", hide_index=True, key="reading_order_table")
     selected_path = st.selectbox("查看模块详情", [item.path for item in visible], key="selected_module")
     _render_module_detail(report, selected_path, st)
-    st.subheader("评分明细", help="核心评分综合规模、依赖、入口可达性和 Git 修改热度，最高为 100 分。")
-    scores: list[Row] = [{"路径": item.path, "语言": item.language, "规模": item.size_score, "依赖": item.dependency_score, "入口": item.entry_score, "Git": item.git_score, "总分": item.total_score} for item in sorted(report.insights.module_scores, key=lambda score: (-score.total_score, score.path))[:report.options.result_limit]]
+    st.subheader("评分明细", help="总分最高 100 分：规模最高 20 分；依赖分最高 35 分，每个入边计 7 分、每个出边计 2 分；入口分最高 20 分，每远离入口一层减 4 分；Git 分最高 25 分。")
+    scores: list[Row] = [{"路径": item.path, "语言": item.language, "规模": item.size_score, "依赖": item.dependency_score, "入口": item.entry_score, "Git": item.git_score, "总分": item.total_score} for item in sorted(report.insights.module_scores, key=lambda score: (-score.total_score, score.path))[:reading_limit]]
     st.dataframe(scores, width="stretch", hide_index=True)
     if report.insights.reading_paths:
         with st.expander("入口到推荐模块的依赖路径"):
-            rows: list[Row] = [{"入口": item.entry, "目标": item.target, "路径": " -> ".join(item.nodes)} for item in report.insights.reading_paths[:report.options.result_limit]]
+            rows: list[Row] = [{"入口": item.entry, "目标": item.target, "路径": " -> ".join(item.nodes)} for item in report.insights.reading_paths[:reading_limit]]
             st.dataframe(rows, width="stretch", hide_index=True)
 
 

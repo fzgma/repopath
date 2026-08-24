@@ -26,7 +26,21 @@ def test_mixed_repository_report_contains_python_and_cpp_sections() -> None:
     assert payload["overview"]["dependency_nodes"] == 8
     assert payload["insights"]["reading_order"]
     assert "## 推荐阅读顺序" in markdown
+    assert "## 文件清单" not in markdown
+    assert "依赖分最高 35 分" in markdown
+    assert "风险分等于依赖分加 Git 分" in markdown
     assert any(edge["kind"] == "include" for edge in payload["dependencies"]["edges"])
     assert any(edge["kind"] == "import" for edge in payload["dependencies"]["edges"])
     assert isinstance(payload["directories"]["pkg"], int)
     assert payload["directory_stats"]["pkg"]["files"] == 3
+
+
+def test_markdown_file_list_is_opt_in() -> None:
+    """验证 Markdown 文件清单默认关闭且可由配置选项打开。"""
+    report = analyze_repository(FIXTURE_ROOT)
+    report.options = report.options.with_overrides(include_file_list=True, reading_limit=1)
+
+    markdown = MarkdownRenderer().render(report)
+
+    assert "## 文件清单" in markdown
+    assert "`python_app.py`" in markdown

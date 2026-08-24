@@ -36,6 +36,8 @@ class JsonRenderer:
                 "profile": report.options.profile,
                 "git_period": report.options.git_period,
                 "result_limit": report.options.result_limit,
+                "reading_limit": report.options.reading_limit,
+                "include_file_list": report.options.include_file_list,
                 "analyzer_durations": report.analyzer_durations,
             },
             "languages": {

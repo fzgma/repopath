@@ -20,7 +20,7 @@ IGNORED_DIRS = {
     "node_modules",
 }
 
-IGNORED_FILES = {"REPOPATH_REPORT.md", "REPOPATH_REPORT.json"}
+IGNORED_FILES = {".repopath.toml", "REPOPATH_REPORT.md", "REPOPATH_REPORT.json"}
 
 
 class FileSystemProvider:

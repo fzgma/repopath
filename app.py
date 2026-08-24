@@ -3,7 +3,7 @@
 from importlib import import_module
 from typing import Any, cast
 
-from repopath.core.config import load_analysis_options
+from repopath.core.config import ensure_default_config, load_analysis_options
 from repopath.core.service import analyze_repository
 from repopath.interface.ui import render_application
 
@@ -15,7 +15,7 @@ def main() -> None:
     except ModuleNotFoundError as exc:
         raise SystemExit("缺少 Streamlit，请先执行：python.exe -m pip install -r requirements.txt") from exc
     st.set_page_config(page_title="RepoPath", layout="wide")
-    render_application(st, analyze_repository, load_analysis_options)
+    render_application(st, analyze_repository, load_analysis_options, ensure_default_config)
 
 
 if __name__ == "__main__":

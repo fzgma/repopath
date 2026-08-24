@@ -20,32 +20,37 @@ AnalyzeRepository: TypeAlias = Callable[
     RepositoryReport,
 ]
 LoadOptions: TypeAlias = Callable[[Path], AnalysisOptions]
+EnsureConfig: TypeAlias = Callable[[Path], Path]
 _GIT_PERIODS = {"全部历史": "all", "最近 30 天": "30", "最近 90 天": "90"}
 
 
-def render_application(st: StreamlitApi, analyze: AnalyzeRepository, load_options: LoadOptions) -> None:
+def render_application(st: StreamlitApi, analyze: AnalyzeRepository, load_options: LoadOptions, ensure_config: EnsureConfig) -> None:
     """渲染分析表单、执行同步任务并展示会话结果。"""
     snapshot = get_snapshot(st.session_state)
     st.title("RepoPath")
+    source = st.text_input("仓库来源（本地目录）", value=snapshot.source or ".", help="当前版本仅支持本地目录；远程来源将在 Core Provider 支持后开放。")
+    source_key = str(Path(source).expanduser().resolve())
+    configured_options = _default_options(source, load_options)
+    default_label = label_for_profile(configured_options.profile)
     with st.form("analysis_form", clear_on_submit=False):
-        source = st.text_input("仓库来源（本地目录）", value=snapshot.source or ".", help="当前版本仅支持本地目录；远程来源将在 Core Provider 支持后开放。")
-        configured_options = _default_options(source, load_options)
-        default_label = label_for_profile(configured_options.profile)
         label = st.segmented_control(
             "分析模式",
             [spec.label for spec in PROFILE_SPECS],
             default=default_label,
             selection_mode="single",
             help="；".join(f"{spec.label}：{spec.description}" for spec in PROFILE_SPECS),
+            key=f"profile:{source_key}",
         )
         with st.expander("高级配置"):
             git_labels = list(_GIT_PERIODS)
-            git_label = st.selectbox("Git 时间范围", git_labels, index=git_labels.index(_git_label(configured_options.git_period)), help="限制 Git 历史读取范围；范围越小，Git 分析通常越快。")
-            max_file_size_mb = st.number_input("最大文件大小（MB）", min_value=0, value=_megabytes(configured_options.max_file_size), step=1, help="单个可读取文本文件的大小上限；0 表示不限制。")
-            result_limit = st.number_input("页面结果数量", min_value=1, value=configured_options.result_limit, step=1, help="限制页面表格和图表展示数量，不影响完整报告下载。")
+            git_label = st.selectbox("Git 时间范围", git_labels, index=git_labels.index(_git_label(configured_options.git_period)), help="限制 Git 历史读取范围；范围越小，Git 分析通常越快。", key=f"git-period:{source_key}")
+            max_file_size_mb = st.number_input("最大文件大小（MB）", min_value=0, value=_megabytes(configured_options.max_file_size), step=1, help="单个可读取文本文件的大小上限；0 表示不限制。", key=f"max-file-size:{source_key}")
+            result_limit = st.number_input("页面结果数量", min_value=1, value=configured_options.result_limit, step=1, help="限制页面表格和图表展示数量，不影响完整报告下载。", key=f"result-limit:{source_key}")
+            reading_limit = st.number_input("阅读与评分数量", min_value=1, value=configured_options.reading_limit, step=1, help="限制推荐阅读和评分明细的默认展示数量。", key=f"reading-limit:{source_key}")
+            include_file_list = st.checkbox("Markdown 包含文件清单", value=configured_options.include_file_list, help="默认不包含，以避免 Markdown 报告在大型仓库中变得过长。", key=f"include-file-list:{source_key}")
         submitted = st.form_submit_button("分析仓库", type="primary", width="stretch", disabled=snapshot.state.value == "running")
     if submitted:
-        _run_analysis(st, source, label or default_label, git_label, int(max_file_size_mb), int(result_limit), analyze, load_options)
+        _run_analysis(st, source, label or default_label, git_label, int(max_file_size_mb), int(result_limit), int(reading_limit), include_file_list, analyze, load_options, ensure_config)
     render_snapshot(get_snapshot(st.session_state), st)
 
 
@@ -70,11 +75,14 @@ def _megabytes(size: int | None) -> int:
     return 0 if size is None else ceil(size / (1024 * 1024))
 
 
-def _run_analysis(st: StreamlitApi, source: str, label: str, git_label: str, max_file_size_mb: int, result_limit: int, analyze: AnalyzeRepository, load_options: LoadOptions) -> None:
+def _run_analysis(st: StreamlitApi, source: str, label: str, git_label: str, max_file_size_mb: int, result_limit: int, reading_limit: int, include_file_list: bool, analyze: AnalyzeRepository, load_options: LoadOptions, ensure_config: EnsureConfig) -> None:
     """解析 UI 配置、更新快照并执行一次同步分析。"""
     progress: Any = None
     try:
         root = Path(source).expanduser().resolve()
+        if not root.is_dir():
+            raise NotADirectoryError(f"仓库目录不存在：{root}")
+        ensure_config(root)
         base = load_options(root)
         preset = profile_for_label(label).options()
         options = base.with_overrides(
@@ -87,6 +95,8 @@ def _run_analysis(st: StreamlitApi, source: str, label: str, git_label: str, max
             git_period=_GIT_PERIODS[git_label],
             max_file_size=None if max_file_size_mb == 0 else max_file_size_mb * 1024 * 1024,
             result_limit=result_limit,
+            reading_limit=reading_limit,
+            include_file_list=include_file_list,
         )
         begin_run(st.session_state, source, options)
         progress = st.progress(0, text="正在准备分析")

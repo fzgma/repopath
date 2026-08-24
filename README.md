@@ -155,6 +155,7 @@ python.exe -m repopath . --format json -o REPOPATH_REPORT.json
 ```powershell
 python.exe -m repopath . --profile deep --git-period 90 --result-limit 30
 python.exe -m repopath . --exclude "generated/*" --max-file-size 2097152
+python.exe -m repopath . --reading-limit 10 --include-file-list
 python.exe -m repopath . --no-cpp --no-git
 ```
 
@@ -172,22 +173,23 @@ follow_symlinks = false
 exclude = ["generated/*", "*.min.js"]
 
 [analyzers]
-python = true
-cpp = true
-git = true
-dependencies = true
-insights = true
+# 可选：显式覆盖 profile 中的单项开关
+# cpp = false
 
 [git]
 period = "all"
 
 [report]
 limit = 50
+reading_limit = 10
+include_file_list = false
 ```
 
-覆盖顺序为：CLI 参数 > `.repopath.toml` > 内置默认值。配置使用 Python 标准库 `tomllib` 读取。
+首次通过 CLI 分析仓库时，如果根目录缺少 `.repopath.toml`，RepoPath 会创建以上默认配置后再读取。UI 会在实际点击“分析仓库”时执行相同行为；仅打开页面不会写入文件。`--config` 可指定其他配置文件，缺失的显式配置文件不会自动创建。
 
-核心模块总分最高为 100 分：代码规模 20 分、依赖关系 35 分、入口可达性 20 分、Git 修改热度 25 分。推荐阅读顺序优先列出入口及入口可达模块，再结合总分排序；风险热点由依赖分和 Git 分共同决定。
+覆盖顺序为：CLI 参数 > `.repopath.toml` > 内置默认值。配置使用 Python 标准库 `tomllib` 读取。`report.limit` 控制通用结果列表上限，`report.reading_limit` 单独控制推荐阅读和核心评分，默认展示 10 个文件；`report.include_file_list` 控制 Markdown 是否包含完整文件清单，默认关闭。
+
+核心模块总分最高为 100 分：代码规模最高 20 分，每 25 行非空代码计 1 分；依赖分最高 35 分，每个被依赖入边计 7 分、每个主动依赖出边计 2 分；入口可达性最高 20 分，入口为 20 分且每远离入口一层减 4 分；Git 修改热度最高 25 分，由历史修改次数和近 90 天修改次数累计。推荐阅读顺序优先列出入口及入口可达模块，再按总分排序。风险分等于依赖分加 Git 分，仅将同时存在依赖关系和 Git 修改记录的模块列为风险热点。
 
 ### 6. 启动 Streamlit UI
 
@@ -207,7 +209,7 @@ python.exe run_streamlit.py
 | 标准 | 快速模式加 Python AST、C++ 基础结构和 Git 历史统计 | 了解代码组成和演进 |
 | 深度 | 全部 Analyzer，包含依赖图、评分、阅读路线和 Git 热点 | 进行完整代码阅读 |
 
-页面会先读取目标目录 `.repopath.toml` 的模式和高级配置，再应用用户在页面中选择的模式与高级参数。UI 覆盖顺序为：内置默认值 < `.repopath.toml` < 已选择模式 < UI 高级配置。高级配置可设置 Git 历史时间范围、单文件读取上限和页面结果数量；页面截断只影响视图，Markdown 和 JSON 下载始终保留完整 `RepositoryReport`。
+页面会先读取目标目录 `.repopath.toml` 的模式和高级配置，再应用用户在页面中选择的模式与高级参数。UI 覆盖顺序为：内置默认值 < `.repopath.toml` < 已选择模式 < UI 高级配置。高级配置可设置 Git 历史时间范围、单文件读取上限、通用页面结果数量、阅读与评分数量，以及 Markdown 文件清单开关；页面截断只影响视图，Markdown 和 JSON 下载始终保留完整 `RepositoryReport`。
 
 ## 四、使用方式
 
@@ -227,7 +229,7 @@ python.exe -m repopath D:\code\sample-project -o D:\reports\sample-project.md
 
 1. 启动 `run_streamlit.py`。
 2. 在页面中输入本地仓库路径。
-3. 选择快速、标准或深度模式；需要时在“高级配置”调整 Git 时间范围、最大文件大小和页面结果数量。
+3. 选择快速、标准或深度模式；需要时在“高级配置”调整 Git 时间范围、最大文件大小、页面结果数量、阅读与评分数量，以及 Markdown 文件清单开关。
 4. 点击“分析仓库”，页面按 Pipeline 阶段显示进度；重新分析会清理上一份报告，失败时展示可执行的处理建议和原始错误详情。
 5. 在概览、推荐阅读、依赖关系、Python、C++、Git 和报告页签中查看结果；可按语言、目录和路径筛选并排序阅读路线、依赖边和 Git 热点。
 6. 在推荐阅读页选择模块，可联动查看核心评分、推荐原因、正向依赖和反向依赖；在报告页下载完整 Markdown 或 JSON。
@@ -240,7 +242,7 @@ Markdown 报告包含以下主要部分：
 
 - 概览：文件数、非空行数、注释行数和入口候选数量
 - 语言统计：各语言族的文件数、非空行数与文件占比
-- 项目结构：主要目录和文件清单
+- 项目结构：主要目录，以及可选的完整文件清单
 - Python：核心模块候选、入口、import 和本地模块依赖
 - C++：include、函数、类/结构体、命名空间、入口和本地 include 依赖
 - 统一依赖图：正向依赖、循环依赖、孤立模块和目录聚合
