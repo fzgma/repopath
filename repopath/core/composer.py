@@ -7,12 +7,16 @@ from ..model.result import AnalysisState
 from .context import AnalysisContext
 
 
-def compose_report(context: AnalysisContext, state: AnalysisState) -> RepositoryReport:
+def compose_report(
+    context: AnalysisContext, state: AnalysisState
+) -> RepositoryReport:
     """将各 Analyzer 结果合成为统一的 RepositoryReport。"""
     return RepositoryReport(
         repository=context.repository,
         source=context.source,
-        generated_at=datetime.now().astimezone().isoformat(timespec="seconds"),
+        generated_at=datetime.now()
+        .astimezone()
+        .isoformat(timespec="seconds"),
         options=context.options,
         files=state.artifacts.files,
         stats=state.artifacts.stats,

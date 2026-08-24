@@ -5,7 +5,12 @@ from collections import Counter, defaultdict
 from datetime import date, timedelta
 from itertools import combinations
 
-from ..model.git import FileChangeStats, GitCommit, GitSummary, MonthlyChangeStats
+from ..model.git import (
+    FileChangeStats,
+    GitCommit,
+    GitSummary,
+    MonthlyChangeStats,
+)
 from ..model.repository import Repository
 
 
@@ -31,7 +36,9 @@ class GitProvider:
         except OSError as exc:
             raise RuntimeError(f"无法执行 Git：{exc}") from exc
         if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or "Git 命令执行失败")
+            raise RuntimeError(
+                result.stderr.strip() or "Git 命令执行失败"
+            )
         return result.stdout.strip()
 
     def summary(self, period: str = "all") -> GitSummary:
@@ -50,7 +57,10 @@ class GitProvider:
             if period != "all":
                 status_args.insert(1, f"--since={period}.days.ago")
             status_rows = self._run(*status_args).splitlines()
-            shallow = self._run("rev-parse", "--is-shallow-repository") == "true"
+            shallow = (
+                self._run("rev-parse", "--is-shallow-repository")
+                == "true"
+            )
             recent_args = [
                 "log",
                 "-n",
@@ -68,7 +78,11 @@ class GitProvider:
         for row in commit_rows:
             fields = row.split("\t", 3)
             if len(fields) == 4:
-                recent_commits.append(GitCommit(fields[0], fields[1], fields[2], fields[3]))
+                recent_commits.append(
+                    GitCommit(
+                        fields[0], fields[1], fields[2], fields[3]
+                    )
+                )
 
         commits = _parse_numstat_history(history_rows)
         authors: Counter[str] = Counter[str]()
@@ -78,15 +92,21 @@ class GitProvider:
         monthly_changes: dict[str, MonthlyChangeStats] = {}
         recent_30_days: Counter[str] = Counter[str]()
         recent_90_days: Counter[str] = Counter[str]()
-        co_changes: Counter[tuple[str, str]] = Counter[tuple[str, str]]()
-        directory_authors: defaultdict[str, Counter[str]] = defaultdict(Counter[str])
+        co_changes: Counter[tuple[str, str]] = Counter[
+            tuple[str, str]
+        ]()
+        directory_authors: defaultdict[str, Counter[str]] = defaultdict(
+            Counter[str]
+        )
         today = date.today()
 
         for commit_date, author, files in commits:
             authors[author] += 1
             month = commit_date[:7]
             commits_by_month[month] += 1
-            monthly = monthly_changes.setdefault(month, MonthlyChangeStats())
+            monthly = monthly_changes.setdefault(
+                month, MonthlyChangeStats()
+            )
             monthly.commits += 1
             parsed_date = date.fromisoformat(commit_date)
             unique_paths = sorted({path for _, _, path in files})
@@ -98,11 +118,17 @@ class GitProvider:
                 stats.commits += 1
                 stats.additions += additions
                 stats.deletions += deletions
-                stats.first_changed = min(stats.first_changed or commit_date, commit_date)
-                stats.last_changed = max(stats.last_changed or commit_date, commit_date)
+                stats.first_changed = min(
+                    stats.first_changed or commit_date, commit_date
+                )
+                stats.last_changed = max(
+                    stats.last_changed or commit_date, commit_date
+                )
                 monthly.additions += additions
                 monthly.deletions += deletions
-                directory = path.split("/", 1)[0] if "/" in path else "."
+                directory = (
+                    path.split("/", 1)[0] if "/" in path else "."
+                )
                 directory_authors[directory][author] += 1
                 age = today - parsed_date
                 if age <= timedelta(days=30):
@@ -119,12 +145,18 @@ class GitProvider:
                 stats.deleted += 1
             else:
                 stats.modified += 1
-        active_paths = [path for path, _ in recent_90_days.most_common()]
+        active_paths = [
+            path for path, _ in recent_90_days.most_common()
+        ]
         stable_paths = [
             path
             for path, _ in sorted(
                 file_changes.items(),
-                key=lambda item: (-item[1].commits, -item[1].churn, item[0]),
+                key=lambda item: (
+                    -item[1].commits,
+                    -item[1].churn,
+                    item[0],
+                ),
             )
             if path not in recent_90_days
         ]
@@ -150,6 +182,18 @@ class GitProvider:
         )
 
 
+class UnavailableGitProvider:
+    """为不具备本地 Git 历史的仓库返回可解释的降级结果。"""
+
+    def __init__(self, reason: str) -> None:
+        """保存 Git 历史不可用的原因。"""
+        self.reason = reason
+
+    def summary(self, period: str = "all") -> GitSummary:
+        """返回不可用标记而不阻断其他静态分析。"""
+        return GitSummary(error=self.reason, history_period=period)
+
+
 def _parse_numstat_history(
     rows: list[str],
 ) -> list[tuple[str, str, list[tuple[int, int, str]]]]:
@@ -161,7 +205,9 @@ def _parse_numstat_history(
     for row in rows:
         if row.startswith("@@@"):
             if current_date:
-                commits.append((current_date, current_author, current_files))
+                commits.append(
+                    (current_date, current_author, current_files)
+                )
             fields = row[3:].split("\t", 2)
             current_date = fields[1] if len(fields) > 1 else ""
             current_author = fields[2] if len(fields) > 2 else "未知"

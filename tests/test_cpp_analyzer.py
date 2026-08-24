@@ -18,5 +18,11 @@ def test_cpp_analysis_extracts_includes_symbols_and_main() -> None:
     assert report.cpp.type_count == 1
     assert report.cpp.namespace_count >= 2
     assert len(report.cpp.entry_points) == 1
-    assert report.repository.relative_path(report.cpp.entry_points[0].path) == "src/main.cc"
-    assert any(edge.target == "include/greeting.hpp" for edge in report.cpp.dependencies)
+    assert (
+        report.repository.relative_path(report.cpp.entry_points[0].path)
+        == "src/main.cc"
+    )
+    assert any(
+        edge.target == "include/greeting.hpp"
+        for edge in report.cpp.dependencies
+    )

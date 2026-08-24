@@ -17,13 +17,17 @@ class InsightAnalyzer(Analyzer):
 
     name = AnalyzerName.INSIGHTS
 
-    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
+    def analyze(
+        self, context: AnalysisContext, state: AnalysisState
+    ) -> AnalysisResult:
         """计算模块评分、阅读顺序、入口路径和风险热点。"""
         graph = state.artifacts.dependencies
         git = state.artifacts.git
         files = state.artifacts.files
         lines_by_path = {
-            context.repository.relative_path(file.path): file.non_empty_lines
+            context.repository.relative_path(
+                file.path
+            ): file.non_empty_lines
             for file in files
         }
         distances, parents = graph.shortest_paths_from_entries()
@@ -36,11 +40,22 @@ class InsightAnalyzer(Analyzer):
             git_changes = git.changed_paths[node.path]
             recent_changes = git.recent_90_days[node.path]
             size_score = round(min(20.0, lines / 25), 2)
-            dependency_score = round(min(35.0, incoming * 7 + outgoing * 2), 2)
+            dependency_score = round(
+                min(35.0, incoming * 7 + outgoing * 2), 2
+            )
             distance = distances.get(node_id)
-            entry_score = round(max(0.0, 20.0 - (distance or 0) * 4), 2) if distance is not None else 0.0
-            git_score = round(min(25.0, git_changes * 2 + recent_changes * 3), 2)
-            total_score = round(size_score + dependency_score + entry_score + git_score, 2)
+            entry_score = (
+                round(max(0.0, 20.0 - (distance or 0) * 4), 2)
+                if distance is not None
+                else 0.0
+            )
+            git_score = round(
+                min(25.0, git_changes * 2 + recent_changes * 3), 2
+            )
+            total_score = round(
+                size_score + dependency_score + entry_score + git_score,
+                2,
+            )
             insights.module_scores.append(
                 ModuleScore(
                     node_id,
@@ -61,15 +76,19 @@ class InsightAnalyzer(Analyzer):
                 )
             )
 
-        insights.module_scores.sort(key=lambda item: (-item.total_score, item.path))
+        insights.module_scores.sort(
+            key=lambda item: (-item.total_score, item.path)
+        )
         reading_scores = sorted(
             insights.module_scores,
             key=lambda item: (
                 item.entry_distance is None,
-                item.entry_distance if item.entry_distance is not None else 10**9,
+                item.entry_distance
+                if item.entry_distance is not None
+                else 10**9,
                 -item.total_score,
                 item.path,
-            )
+            ),
         )
         for rank, score in enumerate(reading_scores, start=1):
             reasons = _recommendation_reasons(score)
@@ -86,10 +105,14 @@ class InsightAnalyzer(Analyzer):
             )
             path = _reading_path(score.node_id, parents)
             if len(path) > 1:
-                insights.reading_paths.append(ReadingPath(path[0], path[-1], tuple(path)))
+                insights.reading_paths.append(
+                    ReadingPath(path[0], path[-1], tuple(path))
+                )
 
         for score in insights.module_scores:
-            risk_score = round(score.dependency_score + score.git_score, 2)
+            risk_score = round(
+                score.dependency_score + score.git_score, 2
+            )
             if score.git_changes and score.dependency_score:
                 insights.hotspots.append(
                     RiskHotspot(
@@ -101,7 +124,9 @@ class InsightAnalyzer(Analyzer):
                         risk_score,
                     )
                 )
-        insights.hotspots.sort(key=lambda item: (-item.risk_score, item.path))
+        insights.hotspots.sort(
+            key=lambda item: (-item.risk_score, item.path)
+        )
         state.artifacts.insights = insights
         return AnalysisResult(name=self.name)
 

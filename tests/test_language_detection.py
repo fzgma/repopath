@@ -2,7 +2,11 @@
 
 from pathlib import Path
 
-from repopath.model.language import Language, detect_language, language_family
+from repopath.model.language import (
+    Language,
+    detect_language,
+    language_family,
+)
 
 
 def test_cpp_source_and_header_extensions_are_supported() -> None:
@@ -10,5 +14,8 @@ def test_cpp_source_and_header_extensions_are_supported() -> None:
     for suffix in (".cpp", ".cc", ".cxx"):
         assert detect_language(Path(f"sample{suffix}")) is Language.CPP
     for suffix in (".h", ".hpp", ".hh", ".hxx"):
-        assert detect_language(Path(f"sample{suffix}")) is Language.CPP_HEADER
+        assert (
+            detect_language(Path(f"sample{suffix}"))
+            is Language.CPP_HEADER
+        )
     assert language_family(Language.CPP_HEADER) == "C++"

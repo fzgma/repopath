@@ -40,8 +40,12 @@ class AnalysisArtifacts:
     python: PythonAnalysis = field(default_factory=PythonAnalysis)
     cpp: CppAnalysis = field(default_factory=CppAnalysis)
     git: GitSummary = field(default_factory=GitSummary)
-    dependencies: DependencyGraph = field(default_factory=DependencyGraph)
-    insights: RepositoryInsights = field(default_factory=RepositoryInsights)
+    dependencies: DependencyGraph = field(
+        default_factory=DependencyGraph
+    )
+    insights: RepositoryInsights = field(
+        default_factory=RepositoryInsights
+    )
 
 
 @dataclass
@@ -63,8 +67,12 @@ class AnalysisResult:
 class AnalysisState:
     """保存 Pipeline 中各 Analyzer 的执行结果。"""
 
-    artifacts: AnalysisArtifacts = field(default_factory=AnalysisArtifacts)
-    results: dict[AnalyzerName, AnalysisResult] = field(default_factory=dict[AnalyzerName, AnalysisResult])
+    artifacts: AnalysisArtifacts = field(
+        default_factory=AnalysisArtifacts
+    )
+    results: dict[AnalyzerName, AnalysisResult] = field(
+        default_factory=dict[AnalyzerName, AnalysisResult]
+    )
 
     def add(self, result: AnalysisResult) -> None:
         """保存一个 Analyzer 结果并按名称索引。"""
@@ -73,17 +81,28 @@ class AnalysisState:
     @property
     def warnings(self) -> list[str]:
         """汇总所有 Analyzer 的警告信息。"""
-        return [warning for result in self.results.values() for warning in result.warnings]
+        return [
+            warning
+            for result in self.results.values()
+            for warning in result.warnings
+        ]
 
     @property
     def errors(self) -> list[str]:
         """汇总所有 Analyzer 的错误信息。"""
-        return [error for result in self.results.values() for error in result.errors]
+        return [
+            error
+            for result in self.results.values()
+            for error in result.errors
+        ]
 
     @property
     def durations(self) -> dict[str, float]:
         """返回各 Analyzer 的执行耗时。"""
-        return {name: result.duration_seconds for name, result in self.results.items()}
+        return {
+            name: result.duration_seconds
+            for name, result in self.results.items()
+        }
 
 
 @dataclass(frozen=True)

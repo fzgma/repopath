@@ -11,11 +11,20 @@ from ...model.source import SourceDependency, SourceSymbol
 from ..base import Analyzer
 
 
-INCLUDE_PATTERN = re.compile(r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE)
-TYPE_PATTERN = re.compile(r'^\s*(?:class|struct)\s+([A-Za-z_]\w*)', re.MULTILINE)
-NAMESPACE_PATTERN = re.compile(r'^\s*namespace\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)', re.MULTILINE)
+INCLUDE_PATTERN = re.compile(
+    r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE
+)
+TYPE_PATTERN = re.compile(
+    r"^\s*(?:class|struct)\s+([A-Za-z_]\w*)", re.MULTILINE
+)
+NAMESPACE_PATTERN = re.compile(
+    r"^\s*namespace\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)", re.MULTILINE
+)
 FUNCTION_PATTERN = re.compile(
-    r'^\s*(?!if\b|for\b|while\b|switch\b|catch\b)(?:[A-Za-z_~][\w:<>,~*&]*\s+)+((?:[A-Za-z_]\w*::)*[A-Za-z_]\w*)\s*\([^;{}]*\)\s*(?:const\s*)?(?:noexcept\s*)?(?:\{|;|:)',
+    r"^\s*(?!if\b|for\b|while\b|switch\b|catch\b)"
+    r"(?:[A-Za-z_~][\w:<>,~*&]*\s+)+"
+    r"((?:[A-Za-z_]\w*::)*[A-Za-z_]\w*)\s*\([^;{}]*\)\s*"
+    r"(?:const\s*)?(?:noexcept\s*)?(?:\{|;|:)",
     re.MULTILINE,
 )
 
@@ -30,7 +39,9 @@ class CppAnalyzer(Analyzer):
 
     name = AnalyzerName.CPP
 
-    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
+    def analyze(
+        self, context: AnalysisContext, state: AnalysisState
+    ) -> AnalysisResult:
         """从 C++ 源文件和头文件中提取基础静态结构。"""
         files = [
             file
@@ -48,32 +59,62 @@ class CppAnalyzer(Analyzer):
         for file in files:
             source = context.filesystem.read_text(file.path)
             if source is None:
-                warnings.append(f"无法读取 C++ 文件：{context.repository.relative_path(file.path)}")
+                warnings.append(
+                    "无法读取 C++ 文件："
+                    f"{context.repository.relative_path(file.path)}"
+                )
                 continue
             item = CppFileAnalysis(path=file.path)
             source_name = context.repository.relative_path(file.path)
             item.includes = INCLUDE_PATTERN.findall(source)
             analysis.include_counts.update(item.includes)
             item.functions = [
-                SourceSymbol(match.group(1).split("::")[-1], "function", file.path, line_number(source, match.start()))
+                SourceSymbol(
+                    match.group(1).split("::")[-1],
+                    "function",
+                    file.path,
+                    line_number(source, match.start()),
+                )
                 for match in FUNCTION_PATTERN.finditer(source)
             ]
             item.types = [
-                SourceSymbol(match.group(1), "class_or_struct", file.path, line_number(source, match.start()))
+                SourceSymbol(
+                    match.group(1),
+                    "class_or_struct",
+                    file.path,
+                    line_number(source, match.start()),
+                )
                 for match in TYPE_PATTERN.finditer(source)
             ]
             item.namespaces = [
-                SourceSymbol(match.group(1), "namespace", file.path, line_number(source, match.start()))
+                SourceSymbol(
+                    match.group(1),
+                    "namespace",
+                    file.path,
+                    line_number(source, match.start()),
+                )
                 for match in NAMESPACE_PATTERN.finditer(source)
             ]
-            analysis.entry_points.extend(symbol for symbol in item.functions if symbol.name == "main")
+            analysis.entry_points.extend(
+                symbol
+                for symbol in item.functions
+                if symbol.name == "main"
+            )
             analysis.files[file.path] = item
 
             for include in item.includes:
-                target_path = local_paths.get(include) or local_names.get(Path(include).name)
+                target_path = local_paths.get(
+                    include
+                ) or local_names.get(Path(include).name)
                 if target_path:
                     analysis.dependencies.append(
-                        SourceDependency(source_name, context.repository.relative_path(target_path), "include")
+                        SourceDependency(
+                            source_name,
+                            context.repository.relative_path(
+                                target_path
+                            ),
+                            "include",
+                        )
                     )
         state.artifacts.cpp = analysis
         return AnalysisResult(name=self.name, warnings=warnings)

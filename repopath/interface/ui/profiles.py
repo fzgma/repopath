@@ -19,9 +19,21 @@ class ProfileSpec:
 
 
 PROFILE_SPECS = (
-    ProfileSpec("快速", "fast", "仅扫描文件、语言和目录规模，适合先确认仓库范围。"),
-    ProfileSpec("标准", "standard", "增加 Python、C++ 结构和 Git 历史统计，适合快速了解代码组成与演进。"),
-    ProfileSpec("深度", "deep", "运行全部分析，生成依赖图、评分、阅读路线和风险热点，耗时相对更长。"),
+    ProfileSpec(
+        "快速",
+        "fast",
+        "仅扫描文件、语言和目录规模，适合先确认仓库范围。",
+    ),
+    ProfileSpec(
+        "标准",
+        "standard",
+        "增加 Python、C++ 结构和 Git 历史统计，适合快速了解代码组成与演进。",
+    ),
+    ProfileSpec(
+        "深度",
+        "deep",
+        "运行全部分析，生成依赖图、评分、阅读路线和风险热点，耗时相对更长。",
+    ),
 )
 
 _BY_LABEL = {spec.label: spec for spec in PROFILE_SPECS}

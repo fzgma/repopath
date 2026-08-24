@@ -50,7 +50,9 @@ LANGUAGE_BY_EXTENSION = {
 
 def detect_language(path: Path) -> Language:
     """根据文件扩展名识别文件语言。"""
-    return LANGUAGE_BY_EXTENSION.get(path.suffix.lower(), Language.OTHER)
+    return LANGUAGE_BY_EXTENSION.get(
+        path.suffix.lower(), Language.OTHER
+    )
 
 
 def language_family(language: Language) -> str:

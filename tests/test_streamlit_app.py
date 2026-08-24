@@ -14,7 +14,10 @@ def test_streamlit_app_starts_without_running_an_analysis() -> None:
 
     assert not app.exception
     assert app.title[0].value == "RepoPath"
-    assert app.info[0].value == "输入本地仓库路径后开始分析。"
+    assert (
+        app.info[0].value
+        == "输入本地目录或 GitHub 公开仓库地址后开始分析。"
+    )
 
 
 def test_streamlit_app_renders_a_deep_analysis(tmp_path: Path) -> None:
@@ -42,7 +45,21 @@ def test_streamlit_app_renders_a_deep_analysis(tmp_path: Path) -> None:
     assert len(app.metric) >= 6
 
 
-def test_streamlit_app_reads_repository_config_into_advanced_settings(tmp_path: Path) -> None:
+def test_streamlit_app_shows_rate_limit_query_for_github_only() -> None:
+    """验证查询限额按钮只在 GitHub 来源模式中显示。"""
+    app_path = Path(__file__).parents[1] / "app.py"
+    app = AppTest.from_file(str(app_path)).run(timeout=10)
+
+    assert "查询限额" not in [button.label for button in app.button]
+    app.segmented_control[0].set_value("GitHub 公开仓库")
+    app.run(timeout=10)
+
+    assert "查询限额" in [button.label for button in app.button]
+
+
+def test_streamlit_app_reads_repository_config_into_advanced_settings(
+    tmp_path: Path,
+) -> None:
     """验证切换仓库后 UI 会用配置文件填充高级设置。"""
     root = Path(__file__).parents[1]
     (tmp_path / ".repopath.toml").write_text(
@@ -67,7 +84,8 @@ include_file_list = true
     app.run(timeout=10)
 
     assert not app.exception
-    assert app.segmented_control[0].value == "标准"
+    assert app.segmented_control[0].value == "本地目录"
+    assert app.segmented_control[1].value == "标准"
     assert app.selectbox[0].value == "最近 90 天"
     assert [item.value for item in app.number_input] == [3, 12, 4]
     assert app.checkbox[0].value is True

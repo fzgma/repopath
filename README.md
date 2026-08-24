@@ -4,11 +4,11 @@
 
 ## 项目说明
 
-RepoPath 使用 Python 编写。输入本地仓库目录后，工具会扫描文件结构、代码规模、Python 模块关系、C++ 基础静态结构和 Git 历史，并生成统一依赖图、可解释核心评分、推荐阅读顺序以及 Markdown 或 JSON 报告。
+RepoPath 使用 Python 编写。输入本地仓库目录或公开 GitHub 仓库后，工具会扫描文件结构、代码规模、Python 模块关系、C++ 基础静态结构和可用的 Git 历史，并生成统一依赖图、可解释核心评分、推荐阅读顺序以及 Markdown 或 JSON 报告。
 
 项目的目标是在阅读大量源码前，先建立仓库的整体认知，辅助定位入口、核心模块、依赖关系和近期演进情况。
 
-当前仅支持本地目录分析。远程 GitHub 仓库读取已预留后续演进方向，但尚未实现。
+支持本地目录和公开 GitHub 仓库分析。GitHub 分析会固定到一个提交快照，复用本地静态分析能力；Git 演进统计在远程快照中会明确降级为不可用。
 
 ## 一、主要功能
 
@@ -52,6 +52,7 @@ RepoPath 使用 Python 编写。输入本地仓库目录后，工具会扫描文
 - 提供 Streamlit 仓库阅读工作台，在同一条 Pipeline 上查看概览、阅读路线、依赖、Python、C++、Git 和报告
 - 支持快速、标准和深度分析模式、Pipeline 阶段进度、失败建议，以及 Markdown/JSON 完整报告下载
 - 支持按语言、目录、关键词筛选并排序阅读路线、依赖边和 Git 热点；可选择模块查看评分、推荐原因和双向依赖
+- 支持 `owner/repository`、`github.com/owner/repository` 或完整网页地址形式的公开 GitHub 仓库，并可指定分支、标签或提交 SHA
 
 ## 二、项目结构
 
@@ -72,7 +73,7 @@ repopath/
     cli.py                  # 命令行入口
     ui/                     # Streamlit 表单、会话状态和报告视图
   model/                    # 仓库、依赖、洞察和报告模型
-  provider/                 # 文件系统和 Git 数据来源
+  provider/                 # 文件系统、Git 与 GitHub 快照数据来源
   renderer/                 # Markdown 和 JSON 输出
 tests/                      # Analyzer、依赖图、配置、Git、UI 和混合仓库测试
 requirements.txt            # Streamlit UI 依赖
@@ -159,6 +160,29 @@ python.exe -m repopath . --reading-limit 10 --include-file-list
 python.exe -m repopath . --no-cpp --no-git
 ```
 
+分析公开 GitHub 仓库：
+
+```powershell
+python.exe -m repopath https://github.com/owner/repository
+python.exe -m repopath github.com/owner/repository --ref v1.2.3 -o repository.md
+python.exe -m repopath owner/repository
+```
+
+远程分析会先读取 GitHub Core API 的当前额度，再将默认分支或 `--ref` 解析为固定提交 SHA，最后下载一次该提交的 zipball 快照。指定 `--ref` 时共使用2次 GitHub REST 请求；默认分支额外读取一次仓库信息。额度查询不计入 GitHub Core API 配额。概览会展示本次读取到的 `limit`、`remaining` 与 `reset`。报告会记录仓库地址和固定提交；不会克隆仓库，也不会执行目标仓库代码。
+
+匿名 GitHub API 额度有限。可选地设置仅有公开仓库读取权限的 Token，以使用 GitHub 账户额度；RepoPath 不会将 Token 写入配置或报告：
+
+```powershell
+$env:GITHUB_TOKEN = "github_pat_..."
+python.exe -m repopath github.com/owner/repository --ref main
+```
+
+仅查询当前额度而不读取仓库或生成报告：
+
+```powershell
+python.exe -m repopath --rate-limit
+```
+
 使用 `python.exe -m repopath --help` 查看完整参数。
 
 ### 5. 仓库配置
@@ -185,7 +209,7 @@ reading_limit = 10
 include_file_list = false
 ```
 
-首次通过 CLI 分析仓库时，如果根目录缺少 `.repopath.toml`，RepoPath 会创建以上默认配置后再读取。UI 会在实际点击“分析仓库”时执行相同行为；仅打开页面不会写入文件。`--config` 可指定其他配置文件，缺失的显式配置文件不会自动创建。
+首次通过 CLI 分析仓库时，如果配置目录缺少 `.repopath.toml`，RepoPath 会创建以上默认配置后再读取。本地仓库的配置目录是仓库根目录；GitHub 仓库的配置目录是运行命令的当前目录，绝不写入远程仓库。UI 会在实际点击本地“分析仓库”时执行相同行为；仅打开页面不会写入文件。`--config` 可指定其他配置文件，缺失的显式配置文件不会自动创建。
 
 覆盖顺序为：CLI 参数 > `.repopath.toml` > 内置默认值。配置使用 Python 标准库 `tomllib` 读取。`report.limit` 控制通用结果列表上限，`report.reading_limit` 单独控制推荐阅读和核心评分，默认展示 10 个文件；`report.include_file_list` 控制 Markdown 是否包含完整文件清单，默认关闭。
 
@@ -228,7 +252,7 @@ python.exe -m repopath D:\code\sample-project -o D:\reports\sample-project.md
 ### Streamlit UI
 
 1. 启动 `run_streamlit.py`。
-2. 在页面中输入本地仓库路径。
+2. 选择本地目录或 GitHub 公开仓库，再输入对应路径或仓库地址；GitHub 模式可选填分支、标签或提交 SHA。
 3. 选择快速、标准或深度模式；需要时在“高级配置”调整 Git 时间范围、最大文件大小、页面结果数量、阅读与评分数量，以及 Markdown 文件清单开关。
 4. 点击“分析仓库”，页面按 Pipeline 阶段显示进度；重新分析会清理上一份报告，失败时展示可执行的处理建议和原始错误详情。
 5. 在概览、推荐阅读、依赖关系、Python、C++、Git 和报告页签中查看结果；可按语言、目录和路径筛选并排序阅读路线、依赖边和 Git 热点。
@@ -271,16 +295,16 @@ python.exe -m pyright
 
 ## 七、当前限制
 
-1. 仅支持本地目录，不读取 GitHub 或其他远程仓库。
-2. C++ 使用正则进行基础静态识别，不替代完整 C++ AST、编译数据库或类型分析。
-3. Python 仅解析语法和 import，不执行目标仓库代码。
-4. 本地模块依赖与 C++ include 关系是静态近似结果，动态导入、宏展开和构建系统生成文件可能无法准确反映。
-5. 核心评分和阅读顺序用于辅助导航，不代表代码质量或业务重要性的绝对结论。
-6. Git 热点受提交粒度、历史完整性、重命名和浅克隆影响；Git 不可用时该部分会缺失。
-7. 文件共同修改统计将单次提交最多前 50 个路径用于组合，避免超大提交产生二次方开销。
-8. 大型仓库的扫描时间与可读取文件数量、文件大小和 Git 历史长度相关。
-9. Streamlit 页面当前使用同步分析；不提供后台任务、自动刷新或中断按钮。
-10. UI 只开放本地目录输入；GitHub API、认证、缓存和 API 限流尚未实现。
+1. GitHub 仅支持公开仓库；可选 `GITHUB_TOKEN` 只用于提高公开 API 额度，不支持私有仓库、GitHub Enterprise、缓存或自动重试。
+2. GitHub 快照最多下载 100 MB 压缩归档，解压后最多读取 10,000 个文件、100 MB 总内容和 10 MB 单文件；不符合限制或包含不安全路径的归档会被拒绝。
+3. 远程快照不包含本地 `.git`，因此 Git 提交趋势、Churn、共同修改和风险热点中的 Git 分不会生成。
+4. C++ 使用正则进行基础静态识别，不替代完整 C++ AST、编译数据库或类型分析。
+5. Python 仅解析语法和 import，不执行目标仓库代码。
+6. 本地模块依赖与 C++ include 关系是静态近似结果，动态导入、宏展开和构建系统生成文件可能无法准确反映。
+7. 核心评分和阅读顺序用于辅助导航，不代表代码质量或业务重要性的绝对结论。
+8. 本地 Git 热点受提交粒度、历史完整性、重命名和浅克隆影响；Git 不可用时该部分会缺失。
+9. 文件共同修改统计将单次提交最多前 50 个路径用于组合，避免超大提交产生二次方开销。
+10. Streamlit 页面当前使用同步分析；不提供后台任务、自动刷新或中断按钮。
 
 ## 八、开源许可
 

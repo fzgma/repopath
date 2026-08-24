@@ -12,25 +12,34 @@ class FileAnalyzer(Analyzer):
 
     name = AnalyzerName.FILES
 
-    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
+    def analyze(
+        self, context: AnalysisContext, state: AnalysisState
+    ) -> AnalysisResult:
         """扫描仓库文件并生成文件记录列表。"""
         records: list[FileRecord] = []
         warnings: list[str] = []
-        for path in context.filesystem.iter_files(context.excluded_paths):
+        for path in context.filesystem.iter_files(
+            context.excluded_paths
+        ):
             source = context.filesystem.read_text(path)
             if source is None:
-                warnings.append(f"无法读取文件：{context.repository.relative_path(path)}")
+                warnings.append(
+                    f"无法读取文件：{context.repository.relative_path(path)}"
+                )
                 continue
             lines = source.splitlines()
             comment_lines = sum(
-                line.strip().startswith(("#", "//", "/*", "*", "*/")) for line in lines
+                line.strip().startswith(("#", "//", "/*", "*", "*/"))
+                for line in lines
             )
             records.append(
                 FileRecord(
                     path=path,
                     language=detect_language(path),
                     lines=len(lines),
-                    non_empty_lines=sum(bool(line.strip()) for line in lines),
+                    non_empty_lines=sum(
+                        bool(line.strip()) for line in lines
+                    ),
                     comment_lines=comment_lines,
                 )
             )

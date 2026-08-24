@@ -40,12 +40,20 @@ class AnalysisOptions:
                 insights_enabled=False,
             )
         if profile == "standard":
-            return cls(profile=profile, dependencies_enabled=False, insights_enabled=False)
+            return cls(
+                profile=profile,
+                dependencies_enabled=False,
+                insights_enabled=False,
+            )
         return cls(profile=profile)
 
     def with_overrides(self, **values: object) -> "AnalysisOptions":
         """返回应用非空覆盖值后的分析选项。"""
-        filtered = {key: value for key, value in values.items() if value is not None}
+        filtered = {
+            key: value
+            for key, value in values.items()
+            if value is not None
+        }
         options = replace(self, **filtered)
         options.validate()
         return options
@@ -62,8 +70,12 @@ class AnalysisOptions:
             raise ValueError("报告列表最大数量必须大于 0")
         if self.reading_limit <= 0:
             raise ValueError("阅读和评分列表最大数量必须大于 0")
-        if self.dependencies_enabled and not (self.python_enabled or self.cpp_enabled):
-            raise ValueError("依赖分析至少需要启用 Python 或 C++ Analyzer")
+        if self.dependencies_enabled and not (
+            self.python_enabled or self.cpp_enabled
+        ):
+            raise ValueError(
+                "依赖分析至少需要启用 Python 或 C++ Analyzer"
+            )
         if self.insights_enabled and not self.dependencies_enabled:
             raise ValueError("阅读洞察需要启用依赖分析")
 

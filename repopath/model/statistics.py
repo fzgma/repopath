@@ -10,9 +10,15 @@ class RepositoryStats:
 
     language_counts: Counter[str] = field(default_factory=Counter[str])
     language_lines: Counter[str] = field(default_factory=Counter[str])
-    language_comment_lines: Counter[str] = field(default_factory=Counter[str])
-    language_family_counts: Counter[str] = field(default_factory=Counter[str])
-    language_family_lines: Counter[str] = field(default_factory=Counter[str])
+    language_comment_lines: Counter[str] = field(
+        default_factory=Counter[str]
+    )
+    language_family_counts: Counter[str] = field(
+        default_factory=Counter[str]
+    )
+    language_family_lines: Counter[str] = field(
+        default_factory=Counter[str]
+    )
     directory_counts: Counter[str] = field(default_factory=Counter[str])
     directory_lines: Counter[str] = field(default_factory=Counter[str])
 

@@ -12,7 +12,9 @@ class StatisticsAnalyzer(Analyzer):
 
     name = AnalyzerName.STATISTICS
 
-    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
+    def analyze(
+        self, context: AnalysisContext, state: AnalysisState
+    ) -> AnalysisResult:
         """汇总文件数量、非空行数、语言和目录分布。"""
         files = state.artifacts.files
         stats = RepositoryStats()
@@ -25,7 +27,9 @@ class StatisticsAnalyzer(Analyzer):
             stats.language_family_counts[family] += 1
             stats.language_family_lines[family] += file.non_empty_lines
             relative = file.path.relative_to(context.repository.root)
-            directory = relative.parts[0] if len(relative.parts) > 1 else "."
+            directory = (
+                relative.parts[0] if len(relative.parts) > 1 else "."
+            )
             stats.directory_counts[directory] += 1
             stats.directory_lines[directory] += file.non_empty_lines
         state.artifacts.stats = stats

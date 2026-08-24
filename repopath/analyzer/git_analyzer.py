@@ -10,7 +10,9 @@ class GitAnalyzer(Analyzer):
 
     name = AnalyzerName.GIT
 
-    def analyze(self, context: AnalysisContext, state: AnalysisState) -> AnalysisResult:
+    def analyze(
+        self, context: AnalysisContext, state: AnalysisState
+    ) -> AnalysisResult:
         """读取 Git Provider 并返回 Git 历史摘要。"""
         summary = context.git.summary(context.options.git_period)
         warnings = [summary.error] if summary.error else []

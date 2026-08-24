@@ -15,6 +15,8 @@ class Analyzer(ABC):
     name: ClassVar[AnalyzerName]
 
     @abstractmethod
-    def analyze(self, context: "AnalysisContext", state: AnalysisState) -> AnalysisResult:
+    def analyze(
+        self, context: "AnalysisContext", state: AnalysisState
+    ) -> AnalysisResult:
         """基于上下文和已有结果执行一次分析。"""
         raise NotImplementedError

@@ -5,8 +5,10 @@ from pathlib import Path
 
 from ..model.options import AnalysisOptions
 from ..model.repository import Repository, RepositorySource
-from ..provider.base import RepositoryFileProvider
-from ..provider.git import GitProvider
+from ..provider.base import (
+    RepositoryFileProvider,
+    RepositoryGitProvider,
+)
 
 
 @dataclass
@@ -16,6 +18,6 @@ class AnalysisContext:
     repository: Repository
     source: RepositorySource
     filesystem: RepositoryFileProvider
-    git: GitProvider
+    git: RepositoryGitProvider
     options: AnalysisOptions = field(default_factory=AnalysisOptions)
     excluded_paths: set[Path] = field(default_factory=set[Path])

@@ -38,11 +38,15 @@ class AnalysisConfigError(ValueError):
     """表示仓库分析配置无法读取或校验。"""
 
 
-def config_path_for(root: Path, config_path: str | Path | None = None) -> Path:
+def config_path_for(
+    root: Path, config_path: str | Path | None = None
+) -> Path:
     """解析仓库配置文件的绝对路径。"""
     if config_path:
         candidate = Path(config_path).expanduser()
-        return (candidate if candidate.is_absolute() else root / candidate).resolve()
+        return (
+            candidate if candidate.is_absolute() else root / candidate
+        ).resolve()
     return root / DEFAULT_CONFIG_NAME
 
 
@@ -54,7 +58,9 @@ def ensure_default_config(root: Path) -> Path:
     try:
         path.write_text(DEFAULT_CONFIG_TEXT, encoding="utf-8")
     except OSError as exc:
-        raise AnalysisConfigError(f"无法创建默认配置文件 {path}：{exc}") from exc
+        raise AnalysisConfigError(
+            f"无法创建默认配置文件 {path}：{exc}"
+        ) from exc
     return path
 
 
@@ -69,7 +75,9 @@ def load_analysis_options(
     try:
         payload = tomllib.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as exc:
-        raise AnalysisConfigError(f"无法读取配置文件 {path}：{exc}") from exc
+        raise AnalysisConfigError(
+            f"无法读取配置文件 {path}：{exc}"
+        ) from exc
 
     scan = _section(payload, "scan")
     analyzers = _section(payload, "analyzers")
@@ -81,9 +89,17 @@ def load_analysis_options(
     dependencies_enabled = _optional_bool(analyzers, "dependencies")
     insights_enabled = _optional_bool(analyzers, "insights")
     preset = AnalysisOptions.for_profile(profile)
-    effective_python = preset.python_enabled if python_enabled is None else python_enabled
-    effective_cpp = preset.cpp_enabled if cpp_enabled is None else cpp_enabled
-    if dependencies_enabled is False or (not effective_python and not effective_cpp):
+    effective_python = (
+        preset.python_enabled
+        if python_enabled is None
+        else python_enabled
+    )
+    effective_cpp = (
+        preset.cpp_enabled if cpp_enabled is None else cpp_enabled
+    )
+    if dependencies_enabled is False or (
+        not effective_python and not effective_cpp
+    ):
         dependencies_enabled = False
         if insights_enabled is None:
             insights_enabled = False
@@ -100,14 +116,20 @@ def load_analysis_options(
             git_period=str(git["period"]) if "period" in git else None,
             result_limit=_optional_int(report, "limit"),
             reading_limit=_optional_int(report, "reading_limit"),
-            include_file_list=_optional_bool(report, "include_file_list"),
+            include_file_list=_optional_bool(
+                report, "include_file_list"
+            ),
         )
     except (TypeError, ValueError) as exc:
-        raise AnalysisConfigError(f"配置文件 {path} 无效：{exc}") from exc
+        raise AnalysisConfigError(
+            f"配置文件 {path} 无效：{exc}"
+        ) from exc
     return options
 
 
-def _section(payload: dict[str, object], name: str) -> dict[str, object]:
+def _section(
+    payload: dict[str, object], name: str
+) -> dict[str, object]:
     """读取并校验一个 TOML 表。"""
     value = payload.get(name, {})
     if not isinstance(value, dict):
@@ -135,7 +157,9 @@ def _optional_int(section: dict[str, object], key: str) -> int | None:
     return value
 
 
-def _optional_strings(section: dict[str, object], key: str) -> tuple[str, ...] | None:
+def _optional_strings(
+    section: dict[str, object], key: str
+) -> tuple[str, ...] | None:
     """读取可选字符串数组配置。"""
     if key not in section:
         return None

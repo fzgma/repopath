@@ -19,7 +19,9 @@ class FakeFileProvider:
         """保存测试文件路径。"""
         self.path = path
 
-    def iter_files(self, excluded_paths: set[Path] | None = None) -> Iterator[Path]:
+    def iter_files(
+        self, excluded_paths: set[Path] | None = None
+    ) -> Iterator[Path]:
         """返回唯一的测试文件。"""
         yield self.path
 
@@ -28,7 +30,9 @@ class FakeFileProvider:
         return "value = 1\n"
 
 
-def test_pipeline_accepts_provider_protocol_and_reports_progress(tmp_path: Path) -> None:
+def test_pipeline_accepts_provider_protocol_and_reports_progress(
+    tmp_path: Path,
+) -> None:
     """验证 Pipeline 使用文件 Provider 协议并发送阶段进度。"""
     path = tmp_path / "sample.py"
     repository = Repository.from_path(tmp_path)

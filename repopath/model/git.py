@@ -49,17 +49,27 @@ class GitSummary:
     available: bool = False
     commit_count: int = 0
     authors: Counter[str] = field(default_factory=Counter[str])
-    recent_commits: list[GitCommit] = field(default_factory=list[GitCommit])
+    recent_commits: list[GitCommit] = field(
+        default_factory=list[GitCommit]
+    )
     changed_paths: Counter[str] = field(default_factory=Counter[str])
     commits_by_month: Counter[str] = field(default_factory=Counter[str])
     first_commit_date: str | None = None
     last_commit_date: str | None = None
-    file_changes: dict[str, FileChangeStats] = field(default_factory=dict[str, FileChangeStats])
-    monthly_changes: dict[str, MonthlyChangeStats] = field(default_factory=dict[str, MonthlyChangeStats])
+    file_changes: dict[str, FileChangeStats] = field(
+        default_factory=dict[str, FileChangeStats]
+    )
+    monthly_changes: dict[str, MonthlyChangeStats] = field(
+        default_factory=dict[str, MonthlyChangeStats]
+    )
     recent_30_days: Counter[str] = field(default_factory=Counter[str])
     recent_90_days: Counter[str] = field(default_factory=Counter[str])
-    co_changes: Counter[tuple[str, str]] = field(default_factory=Counter[tuple[str, str]])
-    directory_authors: dict[str, Counter[str]] = field(default_factory=dict[str, Counter[str]])
+    co_changes: Counter[tuple[str, str]] = field(
+        default_factory=Counter[tuple[str, str]]
+    )
+    directory_authors: dict[str, Counter[str]] = field(
+        default_factory=dict[str, Counter[str]]
+    )
     active_paths: list[str] = field(default_factory=list[str])
     stable_paths: list[str] = field(default_factory=list[str])
     shallow: bool = False

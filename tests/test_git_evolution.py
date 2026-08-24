@@ -9,7 +9,9 @@ from repopath.model.repository import Repository
 from repopath.provider.git import GitProvider
 
 
-def _git(root: Path, *args: str, commit_date: date | None = None) -> None:
+def _git(
+    root: Path, *args: str, commit_date: date | None = None
+) -> None:
     """在测试仓库中执行一条 Git 命令。"""
     environment = os.environ.copy()
     if commit_date:
@@ -26,7 +28,9 @@ def _git(root: Path, *args: str, commit_date: date | None = None) -> None:
     )
 
 
-def test_git_summary_tracks_churn_periods_cochanges_and_authors(tmp_path: Path) -> None:
+def test_git_summary_tracks_churn_periods_cochanges_and_authors(
+    tmp_path: Path,
+) -> None:
     """验证 Git 摘要可统计变更规模、活跃度和共同修改。"""
     _git(tmp_path, "init")
     _git(tmp_path, "config", "user.name", "RepoPath Test")
@@ -39,7 +43,9 @@ def test_git_summary_tracks_churn_periods_cochanges_and_authors(tmp_path: Path) 
     (source / "b.py").write_text("value = 2\n", encoding="utf-8")
     _git(tmp_path, "add", "src/a.py", "src/b.py")
     _git(tmp_path, "commit", "-m", "add sources", commit_date=old_date)
-    (source / "a.py").write_text("value = 1\nnext_value = 3\n", encoding="utf-8")
+    (source / "a.py").write_text(
+        "value = 1\nnext_value = 3\n", encoding="utf-8"
+    )
     _git(tmp_path, "add", "src/a.py")
     _git(tmp_path, "commit", "-m", "update a", commit_date=recent_date)
 

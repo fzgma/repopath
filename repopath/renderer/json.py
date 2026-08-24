@@ -3,6 +3,7 @@
 import json
 
 from ..model.report import RepositoryReport
+from ..model.repository import RepositorySourceType
 
 
 class JsonRenderer:
@@ -10,15 +11,29 @@ class JsonRenderer:
 
     def render(self, report: RepositoryReport) -> str:
         """生成包含所有主要分析结果的 JSON 文本。"""
+        rate_limit = report.github_rate_limit
+        is_github = (
+            report.source is not None
+            and report.source.type is RepositorySourceType.GITHUB
+        )
         payload: dict[str, object] = {
             "schema_version": report.schema_version,
             "tool_version": report.tool_version,
             "generated_at": report.generated_at,
             "repository": {
                 "name": report.repository.name,
-                "root": str(report.repository.root),
-                "source_type": str(report.source.type) if report.source else "local",
-                "source_location": report.source.location if report.source else str(report.repository.root),
+                "root": report.source.location
+                if is_github and report.source
+                else str(report.repository.root),
+                "source_type": str(report.source.type)
+                if report.source
+                else "local",
+                "source_location": report.source.location
+                if report.source
+                else str(report.repository.root),
+                "source_reference": report.source.reference
+                if report.source
+                else None,
             },
             "overview": {
                 "file_count": len(report.files),
@@ -31,6 +46,14 @@ class JsonRenderer:
                 "dependency_edges": len(report.dependencies.edges),
                 "cycle_count": len(report.dependencies.cycles),
                 "elapsed_seconds": report.elapsed_seconds,
+                "github_api_rate_limit": {
+                    "limit": rate_limit.limit,
+                    "remaining": rate_limit.remaining,
+                    "reset": rate_limit.reset,
+                    "reset_at": rate_limit.reset_at.isoformat(),
+                }
+                if rate_limit is not None
+                else None,
             },
             "analysis": {
                 "profile": report.options.profile,
@@ -41,31 +64,56 @@ class JsonRenderer:
                 "analyzer_durations": report.analyzer_durations,
             },
             "languages": {
-                language: {"files": count, "non_empty_lines": report.stats.language_family_lines[language]}
-                for language, count in report.stats.language_family_counts.items()
+                language: {
+                    "files": count,
+                    "non_empty_lines": (
+                        report.stats.language_family_lines[language]
+                    ),
+                }
+                for language, count in (
+                    report.stats.language_family_counts.items()
+                )
             },
             "directories": dict(report.stats.directory_counts),
             "directory_stats": {
                 directory: {
                     "files": count,
-                    "non_empty_lines": report.stats.directory_lines[directory],
+                    "non_empty_lines": report.stats.directory_lines[
+                        directory
+                    ],
                 }
-                for directory, count in report.stats.directory_counts.items()
+                for directory, count in (
+                    report.stats.directory_counts.items()
+                )
             },
             "python": {
                 "function_count": report.python.function_count,
                 "class_count": report.python.class_count,
                 "imports": dict(report.python.import_counts),
                 "entry_points": [
-                    {"path": report.repository.relative_path(entry.path), "reason": entry.reason}
+                    {
+                        "path": report.repository.relative_path(
+                            entry.path
+                        ),
+                        "reason": entry.reason,
+                    }
                     for entry in report.python.entry_points
                 ],
                 "core_modules": [
-                    {"name": module.name, "lines": module.lines, "references": module.references, "score": module.score}
+                    {
+                        "name": module.name,
+                        "lines": module.lines,
+                        "references": module.references,
+                        "score": module.score,
+                    }
                     for module in report.python.core_modules
                 ],
                 "dependencies": [
-                    {"source": edge.source, "target": edge.target, "kind": edge.kind}
+                    {
+                        "source": edge.source,
+                        "target": edge.target,
+                        "kind": edge.kind,
+                    }
                     for edge in report.python.dependencies
                 ],
             },
@@ -76,11 +124,20 @@ class JsonRenderer:
                 "namespace_count": report.cpp.namespace_count,
                 "includes": dict(report.cpp.include_counts),
                 "entry_points": [
-                    {"path": report.repository.relative_path(entry.path), "line": entry.line}
+                    {
+                        "path": report.repository.relative_path(
+                            entry.path
+                        ),
+                        "line": entry.line,
+                    }
                     for entry in report.cpp.entry_points
                 ],
                 "dependencies": [
-                    {"source": edge.source, "target": edge.target, "kind": edge.kind}
+                    {
+                        "source": edge.source,
+                        "target": edge.target,
+                        "kind": edge.kind,
+                    }
                     for edge in report.cpp.dependencies
                 ],
                 "symbols": [
@@ -91,7 +148,11 @@ class JsonRenderer:
                         "line": symbol.line,
                     }
                     for path, item in report.cpp.files.items()
-                    for symbol in [*item.functions, *item.types, *item.namespaces]
+                    for symbol in [
+                        *item.functions,
+                        *item.types,
+                        *item.namespaces,
+                    ]
                 ],
             },
             "dependencies": {
@@ -102,8 +163,12 @@ class JsonRenderer:
                         "path": node.path,
                         "language": node.language,
                         "kind": node.kind,
-                        "incoming": report.dependencies.incoming_counts[node.id],
-                        "outgoing": report.dependencies.outgoing_counts[node.id],
+                        "incoming": report.dependencies.incoming_counts[
+                            node.id
+                        ],
+                        "outgoing": report.dependencies.outgoing_counts[
+                            node.id
+                        ],
                     }
                     for node in report.dependencies.nodes.values()
                 ],
@@ -114,10 +179,16 @@ class JsonRenderer:
                         "path": node.path,
                         "kind": node.kind,
                     }
-                    for node in report.dependencies.directory_nodes.values()
+                    for node in (
+                        report.dependencies.directory_nodes.values()
+                    )
                 ],
                 "edges": [
-                    {"source": edge.source, "target": edge.target, "kind": edge.kind}
+                    {
+                        "source": edge.source,
+                        "target": edge.target,
+                        "kind": edge.kind,
+                    }
                     for edge in report.dependencies.edges
                 ],
                 "cycles": report.dependencies.cycles,
@@ -125,7 +196,12 @@ class JsonRenderer:
                 "entry_nodes": report.dependencies.entry_nodes,
                 "directory_edges": [
                     {"source": source, "target": target, "count": count}
-                    for (source, target), count in report.dependencies.directory_edges.items()
+                    for (
+                        source,
+                        target,
+                    ), count in (
+                        report.dependencies.directory_edges.items()
+                    )
                 ],
             },
             "insights": {
@@ -164,7 +240,11 @@ class JsonRenderer:
                     for item in report.insights.reading_order
                 ],
                 "reading_paths": [
-                    {"entry": item.entry, "target": item.target, "nodes": list(item.nodes)}
+                    {
+                        "entry": item.entry,
+                        "target": item.target,
+                        "nodes": list(item.nodes),
+                    }
                     for item in report.insights.reading_paths
                 ],
                 "hotspots": [
@@ -218,17 +298,24 @@ class JsonRenderer:
                         "additions": stats.additions,
                         "deletions": stats.deletions,
                     }
-                    for month, stats in report.git.monthly_changes.items()
+                    for month, stats in (
+                        report.git.monthly_changes.items()
+                    )
                 },
                 "recent_30_days": dict(report.git.recent_30_days),
                 "recent_90_days": dict(report.git.recent_90_days),
                 "co_changes": [
                     {"left": left, "right": right, "count": count}
-                    for (left, right), count in report.git.co_changes.items()
+                    for (
+                        left,
+                        right,
+                    ), count in report.git.co_changes.items()
                 ],
                 "directory_authors": {
                     directory: dict(authors)
-                    for directory, authors in report.git.directory_authors.items()
+                    for directory, authors in (
+                        report.git.directory_authors.items()
+                    )
                 },
                 "active_paths": report.git.active_paths,
                 "stable_paths": report.git.stable_paths,

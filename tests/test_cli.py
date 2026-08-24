@@ -9,13 +9,19 @@ import pytest
 from repopath.interface import cli
 from repopath.model.options import AnalysisOptions
 from repopath.model.report import RepositoryReport
-from repopath.model.repository import Repository, RepositorySource
+from repopath.model.repository import (
+    GitHubRateLimit,
+    Repository,
+    RepositorySource,
+)
 from repopath.model.result import AnalysisProgress
 
 
 def _install_fake_analysis(
     monkeypatch: pytest.MonkeyPatch,
-    calls: list[tuple[Path, set[Path], AnalysisOptions]],
+    calls: list[
+        tuple[str | Path | RepositorySource, set[Path], AnalysisOptions]
+    ],
 ) -> None:
     """替换仓库分析服务并记录 CLI 传入的参数。"""
 
@@ -23,15 +29,20 @@ def _install_fake_analysis(
         path: str | Path | RepositorySource,
         excluded_paths: set[Path] | None = None,
         options: AnalysisOptions | None = None,
-        progress_callback: Callable[[AnalysisProgress], None] | None = None,
+        progress_callback: Callable[[AnalysisProgress], None]
+        | None = None,
     ) -> RepositoryReport:
         """返回最小报告以隔离 CLI 的参数和输出逻辑。"""
         assert isinstance(path, Path)
         assert options is not None
         calls.append((path, excluded_paths or set(), options))
-        return RepositoryReport(repository=Repository.from_path(path), options=options)
+        return RepositoryReport(
+            repository=Repository.from_path(path), options=options
+        )
 
-    monkeypatch.setattr(cli, "analyze_repository", fake_analyze_repository)
+    monkeypatch.setattr(
+        cli, "analyze_repository", fake_analyze_repository
+    )
 
 
 def test_cli_writes_markdown_and_passes_options_to_service(
@@ -40,7 +51,9 @@ def test_cli_writes_markdown_and_passes_options_to_service(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """验证 Markdown 输出路径会被排除且 CLI 参数传给分析服务。"""
-    calls: list[tuple[Path, set[Path], AnalysisOptions]] = []
+    calls: list[
+        tuple[str | Path | RepositorySource, set[Path], AnalysisOptions]
+    ] = []
     _install_fake_analysis(monkeypatch, calls)
     monkeypatch.chdir(tmp_path)
 
@@ -64,7 +77,9 @@ def test_cli_writes_markdown_and_passes_options_to_service(
     output = tmp_path / "reports" / "custom.md"
     assert exit_code == 0
     assert output.exists()
-    assert output.read_text(encoding="utf-8").startswith("# RepoPath 报告")
+    markdown = output.read_text(encoding="utf-8")
+    assert markdown.startswith("# RepoPath 报告")
+    assert f"# RepoPath 报告：`{tmp_path.name}`" in markdown
     assert "报告已写入" in capsys.readouterr().out
     assert len(calls) == 1
     root, excluded_paths, options = calls[0]
@@ -84,7 +99,9 @@ def test_cli_uses_json_default_output_when_format_is_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """验证 JSON 格式会将默认输出名切换为 JSON 文件。"""
-    calls: list[tuple[Path, set[Path], AnalysisOptions]] = []
+    calls: list[
+        tuple[str | Path | RepositorySource, set[Path], AnalysisOptions]
+    ] = []
     _install_fake_analysis(monkeypatch, calls)
     monkeypatch.chdir(tmp_path)
 
@@ -98,12 +115,33 @@ def test_cli_uses_json_default_output_when_format_is_json(
     assert calls[0][1] == {output.resolve()}
 
 
+def test_cli_prints_github_rate_limit_without_analysis(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """验证限额查询只输出额度 JSON 而不分析仓库。"""
+    expected = GitHubRateLimit(60, 58, 1_787_580_330)
+    monkeypatch.setattr(
+        cli, "fetch_github_rate_limit", lambda: expected
+    )
+
+    assert cli.main(["--rate-limit"]) == 0
+
+    assert json.loads(capsys.readouterr().out) == {
+        "limit": 60,
+        "remaining": 58,
+        "reset": 1_787_580_330,
+    }
+
+
 def test_cli_generates_and_reads_missing_default_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """验证 CLI 会创建缺失的默认配置文件并将其传入分析服务。"""
-    calls: list[tuple[Path, set[Path], AnalysisOptions]] = []
+    calls: list[
+        tuple[str | Path | RepositorySource, set[Path], AnalysisOptions]
+    ] = []
     _install_fake_analysis(monkeypatch, calls)
     monkeypatch.chdir(tmp_path)
 
@@ -111,12 +149,16 @@ def test_cli_generates_and_reads_missing_default_config(
 
     config = tmp_path / ".repopath.toml"
     assert config.exists()
-    assert "include_file_list = false" in config.read_text(encoding="utf-8")
+    assert "include_file_list = false" in config.read_text(
+        encoding="utf-8"
+    )
     assert calls[0][2].reading_limit == 10
     assert calls[0][2].include_file_list is False
 
 
-def test_resolve_options_gives_cli_priority_over_profile_and_config(tmp_path: Path) -> None:
+def test_resolve_options_gives_cli_priority_over_profile_and_config(
+    tmp_path: Path,
+) -> None:
     """验证 CLI 参数可覆盖预设模式和仓库配置中的选项。"""
     (tmp_path / ".repopath.toml").write_text(
         """
@@ -165,9 +207,13 @@ limit = 20
     assert options.excluded_patterns == ("generated/*", "build/*")
 
 
-def test_resolve_options_disables_dependency_features_without_languages(tmp_path: Path) -> None:
+def test_resolve_options_disables_dependency_features_without_languages(
+    tmp_path: Path,
+) -> None:
     """验证关闭两种语言时会同步关闭依赖和阅读洞察。"""
-    args = cli.build_parser().parse_args([".", "--no-python", "--no-cpp"])
+    args = cli.build_parser().parse_args(
+        [".", "--no-python", "--no-cpp"]
+    )
 
     options = cli._resolve_options(tmp_path, args)
 
@@ -189,3 +235,43 @@ def test_cli_reports_missing_repository_as_argument_error(
         cli.main(["missing"])
 
     assert "仓库目录不存在" in capsys.readouterr().err
+
+
+def test_cli_uses_current_directory_for_github_output_and_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证 GitHub 分析不写远程仓库且固定传递可选引用。"""
+    received: list[RepositorySource] = []
+
+    def fake_analyze_repository(
+        path: str | Path | RepositorySource,
+        excluded_paths: set[Path] | None = None,
+        options: AnalysisOptions | None = None,
+        progress_callback: Callable[[AnalysisProgress], None]
+        | None = None,
+    ) -> RepositoryReport:
+        """记录远程来源并返回可渲染的最小报告。"""
+        assert isinstance(path, RepositorySource)
+        assert options is not None
+        received.append(path)
+        return RepositoryReport(
+            repository=Repository.from_path(tmp_path),
+            source=path,
+            options=options,
+        )
+
+    monkeypatch.setattr(
+        cli, "analyze_repository", fake_analyze_repository
+    )
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["example/demo", "--ref", "v1.2.3"]) == 0
+
+    assert (tmp_path / ".repopath.toml").exists()
+    assert (tmp_path / "REPOPATH_REPORT.md").exists()
+    assert received == [
+        RepositorySource.github(
+            "https://github.com/example/demo", "v1.2.3"
+        )
+    ]

@@ -20,7 +20,11 @@ IGNORED_DIRS = {
     "node_modules",
 }
 
-IGNORED_FILES = {".repopath.toml", "REPOPATH_REPORT.md", "REPOPATH_REPORT.json"}
+IGNORED_FILES = {
+    ".repopath.toml",
+    "REPOPATH_REPORT.md",
+    "REPOPATH_REPORT.json",
+}
 
 
 class FileSystemProvider:
@@ -29,6 +33,7 @@ class FileSystemProvider:
     def __init__(
         self,
         repository: Repository,
+        *,
         ignored_dirs: set[str] | None = None,
         ignored_files: set[str] | None = None,
         excluded_patterns: tuple[str, ...] = (),
@@ -47,14 +52,21 @@ class FileSystemProvider:
         """判断文件是否位于需要跳过的目录中。"""
         relative = path.absolute().relative_to(self.repository.root)
         relative_text = relative.as_posix()
-        return any(part in self.ignored_dirs for part in relative.parts) or any(
-            fnmatch(relative_text, pattern) or fnmatch(path.name, pattern)
+        return any(
+            part in self.ignored_dirs for part in relative.parts
+        ) or any(
+            fnmatch(relative_text, pattern)
+            or fnmatch(path.name, pattern)
             for pattern in self.excluded_patterns
         )
 
-    def iter_files(self, excluded_paths: set[Path] | None = None) -> Iterator[Path]:
+    def iter_files(
+        self, excluded_paths: set[Path] | None = None
+    ) -> Iterator[Path]:
         """剪枝遍历仓库文件并跳过缓存、构建目录和排除路径。"""
-        excluded = {path.resolve() for path in (excluded_paths or set())}
+        excluded = {
+            path.resolve() for path in (excluded_paths or set())
+        }
         for directory, subdirectories, file_names in os.walk(
             self.repository.root,
             followlinks=self.follow_symlinks,
@@ -63,7 +75,10 @@ class FileSystemProvider:
                 name
                 for name in subdirectories
                 if name not in self.ignored_dirs
-                and (self.follow_symlinks or not Path(directory, name).is_symlink())
+                and (
+                    self.follow_symlinks
+                    or not Path(directory, name).is_symlink()
+                )
                 and not self.is_ignored(Path(directory, name))
             )
             for name in sorted(file_names):
@@ -78,7 +93,10 @@ class FileSystemProvider:
     def read_text(self, path: Path) -> str | None:
         """以 UTF-8 容错模式读取文件内容。"""
         try:
-            if self.max_file_size is not None and path.stat().st_size > self.max_file_size:
+            if (
+                self.max_file_size is not None
+                and path.stat().st_size > self.max_file_size
+            ):
                 return None
             return path.read_text(encoding="utf-8", errors="replace")
         except OSError:
