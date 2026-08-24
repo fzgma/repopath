@@ -67,10 +67,10 @@ def collect_symbols(tree: ast.Module, path: Path) -> list[SourceSymbol]:
 
 
 def collect_imports(tree: ast.Module, source_module: str) -> list[str]:
-    """提取绝对导入和可解析的相对导入模块名。"""
+    """提取运行时绝对导入和可解析的相对导入模块名。"""
     imports: set[str] = set()
     package_parts = source_module.split(".")[:-1]
-    for node in ast.walk(tree):
+    for node in _RuntimeImportVisitor().collect(tree):
         if isinstance(node, ast.Import):
             imports.update(alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
@@ -93,6 +93,60 @@ def collect_imports(tree: ast.Module, source_module: str) -> list[str]:
                     for alias in node.names
                 )
     return sorted(imports)
+
+
+class _RuntimeImportVisitor(ast.NodeVisitor):
+    """遍历运行时可执行分支中的 Python import 语句。"""
+
+    def __init__(self) -> None:
+        """初始化 import 结果与 TYPE_CHECKING 名称集合。"""
+        self.import_nodes: list[ast.Import | ast.ImportFrom] = []
+        self.type_checking_names = {"TYPE_CHECKING"}
+        self.typing_module_names = {"typing", "typing_extensions"}
+
+    def collect(
+        self, tree: ast.Module
+    ) -> list[ast.Import | ast.ImportFrom]:
+        """访问模块并返回仅来自运行时路径的导入节点。"""
+        self.visit(tree)
+        return self.import_nodes
+
+    def visit_Import(self, node: ast.Import) -> None:
+        """保存普通导入并记录 typing 模块别名。"""
+        self.import_nodes.append(node)
+        for alias in node.names:
+            root = alias.name.split(".", 1)[0]
+            if root in self.typing_module_names:
+                self.typing_module_names.add(alias.asname or root)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        """保存 from 导入并记录 TYPE_CHECKING 别名。"""
+        self.import_nodes.append(node)
+        if node.module not in self.typing_module_names:
+            return
+        for alias in node.names:
+            if alias.name == "TYPE_CHECKING":
+                self.type_checking_names.add(alias.asname or alias.name)
+
+    def visit_If(self, node: ast.If) -> None:
+        """跳过 TYPE_CHECKING 分支并保留运行时 else 分支。"""
+        if self._is_type_checking_guard(node.test):
+            for statement in node.orelse:
+                self.visit(statement)
+            return
+        self.generic_visit(node)
+
+    def _is_type_checking_guard(self, test: ast.expr) -> bool:
+        """判断条件是否为已识别的 TYPE_CHECKING 保护。"""
+        if isinstance(test, ast.Name):
+            return test.id in self.type_checking_names
+        if not isinstance(test, ast.Attribute):
+            return False
+        return (
+            test.attr == "TYPE_CHECKING"
+            and isinstance(test.value, ast.Name)
+            and test.value.id in self.typing_module_names
+        )
 
 
 class PythonAnalyzer(Analyzer):
@@ -120,6 +174,7 @@ class PythonAnalyzer(Analyzer):
         }
 
         for file in files:
+            context.cancellation.raise_if_cancelled()
             source = context.filesystem.read_text(file.path)
             if source is None:
                 warnings.append(
@@ -158,6 +213,7 @@ class PythonAnalyzer(Analyzer):
             for entry in analysis.entry_points
         }
         for path, imports in analysis.imports_by_file.items():
+            context.cancellation.raise_if_cancelled()
             source_name = module_name(path, context.repository.root)
             for imported in imports:
                 parts = imported.split(".")

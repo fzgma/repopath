@@ -20,6 +20,7 @@ from ..model.result import (
     AnalysisStatus,
 )
 from .context import AnalysisContext
+from .control import AnalysisCancelled
 
 
 class Pipeline:
@@ -44,6 +45,7 @@ class Pipeline:
         ]
         total = len(analyzers)
         for index, analyzer in enumerate(analyzers, start=1):
+            context.cancellation.raise_if_cancelled()
             if progress_callback:
                 progress_callback(
                     AnalysisProgress(
@@ -57,6 +59,8 @@ class Pipeline:
             started_at = perf_counter()
             try:
                 result = analyzer.analyze(context, state)
+            except AnalysisCancelled:
+                raise
             except Exception as exc:
                 result = AnalysisResult(
                     name=analyzer.name,
@@ -66,6 +70,7 @@ class Pipeline:
                 perf_counter() - started_at, 6
             )
             state.add(result)
+            context.cancellation.raise_if_cancelled()
             if progress_callback:
                 progress_callback(
                     AnalysisProgress(

@@ -19,8 +19,13 @@ def render_snapshot(
     snapshot: AnalysisSnapshot, st: StreamlitApi
 ) -> None:
     """展示当前运行状态、错误或已完成的报告。"""
-    if snapshot.state is UiRunState.RUNNING:
-        st.info(f"正在分析：{snapshot.current_stage}")
+    if snapshot.active:
+        st.progress(
+            snapshot.progress_percent,
+            text=snapshot.current_stage,
+        )
+    elif snapshot.state is UiRunState.CANCELLED:
+        st.warning("分析已停止。")
     elif (
         snapshot.state is UiRunState.ERROR
         and snapshot.error is not None
@@ -497,13 +502,21 @@ def _render_dependencies(
     left, right = st.columns(2)
     with left:
         st.subheader(
-            "循环依赖", help="模块之间形成闭环时会增加理解和修改成本。"
+            "循环依赖",
+            help=(
+                "每组成员可经仓库内依赖关系互相到达，形成闭环；"
+                "成员列表不表示实际依赖顺序。"
+            ),
         )
         if graph.cycles:
-            for cycle in graph.cycles[: report.options.result_limit]:
+            for index, cycle in enumerate(
+                graph.cycles[: report.options.result_limit], start=1
+            ):
                 st.warning(
-                    " -> ".join(
-                        graph.nodes[node].path for node in cycle
+                    f"循环组 {index}（{len(cycle)} 个模块）\n\n"
+                    + "\n".join(
+                        f"- `{graph.nodes[node].path}`"
+                        for node in cycle
                     )
                 )
         else:

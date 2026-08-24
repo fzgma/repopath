@@ -21,6 +21,7 @@ class FileAnalyzer(Analyzer):
         for path in context.filesystem.iter_files(
             context.excluded_paths
         ):
+            context.cancellation.raise_if_cancelled()
             source = context.filesystem.read_text(path)
             if source is None:
                 warnings.append(

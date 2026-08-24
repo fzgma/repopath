@@ -1,21 +1,22 @@
-"""Streamlit UI 配置读取和设置测试。"""
+"""Streamlit UI 配置读取和任务提交测试。"""
 
 from collections.abc import Callable
 from pathlib import Path
-
-import pytest
+from time import monotonic, sleep
 
 from repopath.core.config import (
     ensure_default_config,
     load_analysis_options,
 )
-from repopath.interface.ui import application
+from repopath.core.control import CancellationToken
 from repopath.interface.ui.application import (
     _default_options,
     _fetch_rate_limit,
-    _run_analysis,
     _source_value_for_type,
+    _start_analysis,
 )
+from repopath.interface.ui.runtime import AnalysisRuntime
+from repopath.interface.ui.state import get_github_rate_limit
 from repopath.model.options import AnalysisOptions
 from repopath.model.report import RepositoryReport
 from repopath.model.repository import (
@@ -25,40 +26,63 @@ from repopath.model.repository import (
     RepositorySourceType,
 )
 from repopath.model.result import AnalysisProgress
-from repopath.interface.ui.state import (
-    UiRunState,
-    begin_run,
-    get_github_rate_limit,
-    get_snapshot,
-)
-
-
-class _FakeProgress:
-    """记录 UI 进度条的最小替身。"""
-
-    def progress(self, percent: int, text: str) -> None:
-        """接受页面进度更新。"""
-
-    def empty(self) -> None:
-        """接受页面清理请求。"""
 
 
 class _FakeStreamlit:
-    """提供运行分析函数所需的最小 Streamlit 状态。"""
+    """提供额度查询测试所需的最小 Streamlit 状态。"""
 
     def __init__(self) -> None:
-        """初始化会话状态和进度条替身。"""
+        """初始化空会话状态。"""
         self.session_state: dict[str, object] = {}
-
-    def progress(self, percent: int, text: str) -> _FakeProgress:
-        """返回可记录进度的替身对象。"""
-        return _FakeProgress()
 
     def error(self, message: str) -> None:
         """接受额度查询失败提示。"""
 
     def caption(self, message: str) -> None:
         """接受额度查询错误详情。"""
+
+
+class _RecordingAnalyzer:
+    """记录后台运行时收到的来源和配置。"""
+
+    def __init__(self, report_root: Path) -> None:
+        """保存生成最小报告时使用的仓库根目录。"""
+        self.report_root = report_root
+        self.sources: list[Path | RepositorySource] = []
+        self.options: list[AnalysisOptions] = []
+
+    def __call__(
+        self,
+        path: str | Path | RepositorySource,
+        excluded_paths: set[Path] | None = None,
+        options: AnalysisOptions | None = None,
+        progress_callback: Callable[[AnalysisProgress], None]
+        | None = None,
+        *,
+        cancellation_token: CancellationToken | None = None,
+    ) -> RepositoryReport:
+        """记录调用并返回最小仓库报告。"""
+        assert not isinstance(path, str)
+        assert options is not None
+        self.sources.append(path)
+        self.options.append(options)
+        return RepositoryReport(
+            repository=Repository.from_path(self.report_root),
+            source=(
+                path
+                if isinstance(path, RepositorySource)
+                else RepositorySource.local(path)
+            ),
+            options=options,
+        )
+
+
+def _wait_for_runtime(runtime: AnalysisRuntime) -> None:
+    """等待测试后台任务结束并在超时时失败。"""
+    deadline = monotonic() + 2
+    while runtime.snapshot().active and monotonic() < deadline:
+        sleep(0.01)
+    assert not runtime.snapshot().active
 
 
 def test_ui_reads_report_settings_from_repository_config(
@@ -80,37 +104,22 @@ def test_ui_reads_report_settings_from_repository_config(
 
 def test_ui_does_not_reuse_local_input_for_github_source() -> None:
     """验证本地报告不会将点号填入 GitHub 地址输入框。"""
-    assert (
-        _source_value_for_type(
-            ".", RepositorySourceType.LOCAL, is_github=True
-        )
-        == ""
+    value = _source_value_for_type(
+        ".", RepositorySourceType.LOCAL, is_github=True
     )
 
+    assert value == ""
 
-def test_ui_creates_config_and_applies_page_settings(
+
+def test_ui_creates_config_and_submits_page_settings(
     tmp_path: Path,
 ) -> None:
-    """验证 UI 分析前创建配置并以页面设置覆盖报告选项。"""
-    streamlit = _FakeStreamlit()
-    received: list[AnalysisOptions] = []
+    """验证 UI 创建配置并将页面设置提交给后台任务。"""
+    analyzer = _RecordingAnalyzer(tmp_path)
+    runtime = AnalysisRuntime(analyzer)
 
-    def analyze(
-        path: str | Path | RepositorySource,
-        excluded_paths: set[Path] | None,
-        options: AnalysisOptions | None,
-        progress_callback: Callable[[AnalysisProgress], None] | None,
-    ) -> RepositoryReport:
-        """记录 UI 传入选项并返回最小报告。"""
-        assert isinstance(path, Path)
-        assert options is not None
-        received.append(options)
-        return RepositoryReport(
-            repository=Repository.from_path(path), options=options
-        )
-
-    _run_analysis(
-        st=streamlit,
+    _start_analysis(
+        runtime=runtime,
         source=str(tmp_path),
         reference=None,
         is_github=False,
@@ -120,45 +129,29 @@ def test_ui_creates_config_and_applies_page_settings(
         result_limit=20,
         reading_limit=6,
         include_file_list=True,
-        analyze=analyze,
         load_options=load_analysis_options,
         ensure_config=ensure_default_config,
     )
+    _wait_for_runtime(runtime)
 
     assert (tmp_path / ".repopath.toml").exists()
-    assert received[0].git_period == "30"
-    assert received[0].max_file_size == 3 * 1024 * 1024
-    assert received[0].result_limit == 20
-    assert received[0].reading_limit == 6
-    assert received[0].include_file_list is True
+    assert analyzer.options[0].git_period == "30"
+    assert analyzer.options[0].max_file_size == 3 * 1024 * 1024
+    assert analyzer.options[0].result_limit == 20
+    assert analyzer.options[0].reading_limit == 6
+    assert analyzer.options[0].include_file_list is True
 
 
-def test_ui_uses_default_settings_for_github_source(
+def test_ui_submits_github_source_without_writing_config(
     tmp_path: Path,
 ) -> None:
-    """验证 GitHub 分析将 URL 和引用传入 Core 而不写远程配置。"""
-    streamlit = _FakeStreamlit()
-    received: list[RepositorySource] = []
+    """验证 GitHub 来源按固定引用提交且不写远程配置。"""
+    analyzer = _RecordingAnalyzer(tmp_path)
+    runtime = AnalysisRuntime(analyzer)
 
-    def analyze(
-        path: str | Path | RepositorySource,
-        excluded_paths: set[Path] | None,
-        options: AnalysisOptions | None,
-        progress_callback: Callable[[AnalysisProgress], None] | None,
-    ) -> RepositoryReport:
-        """记录远程来源并返回最小报告。"""
-        assert isinstance(path, RepositorySource)
-        assert options is not None
-        received.append(path)
-        return RepositoryReport(
-            repository=Repository.from_path(tmp_path),
-            source=path,
-            options=options,
-        )
-
-    _run_analysis(
-        st=streamlit,
-        source="https://github.com/example/demo",
+    _start_analysis(
+        runtime=runtime,
+        source="example/demo",
         reference="main",
         is_github=True,
         label="快速",
@@ -167,137 +160,25 @@ def test_ui_uses_default_settings_for_github_source(
         result_limit=10,
         reading_limit=10,
         include_file_list=False,
-        analyze=analyze,
         load_options=load_analysis_options,
         ensure_config=ensure_default_config,
     )
+    _wait_for_runtime(runtime)
 
-    assert received == [
-        RepositorySource.github(
-            "https://github.com/example/demo", "main"
-        )
+    assert analyzer.sources == [
+        RepositorySource.github("example/demo", "main")
     ]
     assert not (tmp_path / ".repopath.toml").exists()
 
 
-def test_ui_ignores_second_analysis_while_a_run_is_active(
+def test_ui_queries_rate_limit_only_while_runtime_is_idle(
     tmp_path: Path,
 ) -> None:
-    """验证运行中的页面不会再次启动同步分析。"""
+    """验证空闲运行时允许独立保存 GitHub 额度数据。"""
     streamlit = _FakeStreamlit()
-    begin_run(streamlit.session_state, str(tmp_path), AnalysisOptions())
-    calls: list[Path] = []
-
-    def analyze(
-        path: str | Path | RepositorySource,
-        excluded_paths: set[Path] | None,
-        options: AnalysisOptions | None,
-        progress_callback: Callable[[AnalysisProgress], None] | None,
-    ) -> RepositoryReport:
-        """记录意外启动的分析调用。"""
-        assert isinstance(path, Path)
-        calls.append(path)
-        return RepositoryReport(
-            repository=Repository.from_path(path),
-            options=options or AnalysisOptions(),
-        )
-
-    _run_analysis(
-        st=streamlit,
-        source=str(tmp_path),
-        reference=None,
-        is_github=False,
-        label="快速",
-        git_label="全部历史",
-        max_file_size_mb=0,
-        result_limit=10,
-        reading_limit=10,
-        include_file_list=False,
-        analyze=analyze,
-        load_options=load_analysis_options,
-        ensure_config=ensure_default_config,
-    )
-
-    assert calls == []
-    assert (
-        get_snapshot(streamlit.session_state).state
-        is UiRunState.RUNNING
-    )
-
-
-def test_ui_ignores_queued_analysis_after_completion(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """验证刚完成任务后到达的重复提交不会再次执行。"""
-    streamlit = _FakeStreamlit()
-    calls: list[Path] = []
-    monkeypatch.setattr(application, "monotonic", lambda: 100.0)
-    streamlit.session_state[
-        application._LAST_ANALYSIS_COMPLETED_AT_KEY
-    ] = 99.5
-
-    def analyze(
-        path: str | Path | RepositorySource,
-        excluded_paths: set[Path] | None,
-        options: AnalysisOptions | None,
-        progress_callback: Callable[[AnalysisProgress], None] | None,
-    ) -> RepositoryReport:
-        """记录意外启动的分析调用。"""
-        assert isinstance(path, Path)
-        calls.append(path)
-        return RepositoryReport(
-            repository=Repository.from_path(path),
-            options=options or AnalysisOptions(),
-        )
-
-    _run_analysis(
-        st=streamlit,
-        source=str(tmp_path),
-        reference=None,
-        is_github=False,
-        label="快速",
-        git_label="全部历史",
-        max_file_size_mb=0,
-        result_limit=10,
-        reading_limit=10,
-        include_file_list=False,
-        analyze=analyze,
-        load_options=load_analysis_options,
-        ensure_config=ensure_default_config,
-    )
-
-    assert calls == []
-
-
-def test_ui_queries_rate_limit_without_starting_analysis() -> None:
-    """验证额度查询仅保存额度数据而不创建分析任务。"""
-    streamlit = _FakeStreamlit()
+    runtime = AnalysisRuntime(_RecordingAnalyzer(tmp_path))
     expected = GitHubRateLimit(60, 58, 1_787_580_330)
 
-    _fetch_rate_limit(streamlit, lambda: expected)
+    _fetch_rate_limit(streamlit, lambda: expected, runtime)
 
     assert get_github_rate_limit(streamlit.session_state) == expected
-    assert (
-        get_snapshot(streamlit.session_state).state is UiRunState.IDLE
-    )
-
-
-def test_ui_ignores_rate_limit_query_while_analysis_is_running() -> (
-    None
-):
-    """验证运行中不会执行额度查询。"""
-    streamlit = _FakeStreamlit()
-    begin_run(
-        streamlit.session_state, "example/demo", AnalysisOptions()
-    )
-    calls: list[None] = []
-
-    def fetch_rate_limit() -> GitHubRateLimit:
-        """记录意外执行的额度查询。"""
-        calls.append(None)
-        return GitHubRateLimit(60, 58, 1_787_580_330)
-
-    _fetch_rate_limit(streamlit, fetch_rate_limit)
-
-    assert calls == []

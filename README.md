@@ -125,13 +125,13 @@ CLI 核心功能仅依赖 Python 标准库，在项目根目录可直接运行�
 使用 Streamlit UI 时安装运行依赖：
 
 ```powershell
-python.exe -m pip install -r requirements.txt
+python -m pip install -r requirements.txt
 ```
 
 开发和运行测试时安装开发依赖：
 
 ```powershell
-python.exe -m pip install -r requirements-dev.txt
+python -m pip install -r requirements-dev.txt
 ```
 
 ### 4. 生成报告
@@ -139,14 +139,14 @@ python.exe -m pip install -r requirements-dev.txt
 在项目根目录执行以下任一命令。两种方式调用同一个 CLI 和 Core Pipeline：
 
 ```powershell
-python.exe -m repopath . -o REPOPATH_REPORT.md
-python.exe repopath.py . -o REPOPATH_REPORT.md
+python -m repopath . -o REPOPATH_REPORT.md
+python repopath.py . -o REPOPATH_REPORT.md
 ```
 
 生成 JSON 报告：
 
 ```powershell
-python.exe -m repopath . --format json -o REPOPATH_REPORT.json
+python -m repopath . --format json -o REPOPATH_REPORT.json
 ```
 
 `-o` 用于指定输出路径；未指定时默认生成 `REPOPATH_REPORT.md`。输出文件会自动从本次扫描中排除。
@@ -154,18 +154,18 @@ python.exe -m repopath . --format json -o REPOPATH_REPORT.json
 常用分析参数：
 
 ```powershell
-python.exe -m repopath . --profile deep --git-period 90 --result-limit 30
-python.exe -m repopath . --exclude "generated/*" --max-file-size 2097152
-python.exe -m repopath . --reading-limit 10 --include-file-list
-python.exe -m repopath . --no-cpp --no-git
+python -m repopath . --profile deep --git-period 90 --result-limit 30
+python -m repopath . --exclude "generated/*" --max-file-size 2097152
+python -m repopath . --reading-limit 10 --include-file-list
+python -m repopath . --no-cpp --no-git
 ```
 
 分析公开 GitHub 仓库：
 
 ```powershell
-python.exe -m repopath https://github.com/owner/repository
-python.exe -m repopath github.com/owner/repository --ref v1.2.3 -o repository.md
-python.exe -m repopath owner/repository
+python -m repopath https://github.com/owner/repository
+python -m repopath github.com/owner/repository --ref v1.2.3 -o repository.md
+python -m repopath owner/repository
 ```
 
 远程分析会先读取 GitHub Core API 的当前额度，再将默认分支或 `--ref` 解析为固定提交 SHA，最后下载一次该提交的 zipball 快照。指定 `--ref` 时共使用2次 GitHub REST 请求；默认分支额外读取一次仓库信息。额度查询不计入 GitHub Core API 配额。概览会展示本次读取到的 `limit`、`remaining` 与 `reset`。报告会记录仓库地址和固定提交；不会克隆仓库，也不会执行目标仓库代码。
@@ -174,16 +174,16 @@ python.exe -m repopath owner/repository
 
 ```powershell
 $env:GITHUB_TOKEN = "github_pat_..."
-python.exe -m repopath github.com/owner/repository --ref main
+python -m repopath github.com/owner/repository --ref main
 ```
 
 仅查询当前额度而不读取仓库或生成报告：
 
 ```powershell
-python.exe -m repopath --rate-limit
+python -m repopath --rate-limit
 ```
 
-使用 `python.exe -m repopath --help` 查看完整参数。
+使用 `python -m repopath --help` 查看完整参数。
 
 ### 5. 仓库配置
 
@@ -220,7 +220,7 @@ include_file_list = false
 安装 `requirements.txt` 后，在项目根目录执行：
 
 ```powershell
-python.exe run_streamlit.py
+python run_streamlit.py
 ```
 
 `run_streamlit.py` 会找到根目录的 `app.py`，并通过 Streamlit bootstrap 启动。启动完成后终端会显示实际本地访问地址。
@@ -246,7 +246,7 @@ python.exe run_streamlit.py
 例如：
 
 ```powershell
-python.exe -m repopath D:\code\sample-project -o D:\reports\sample-project.md
+python -m repopath D:\code\sample-project -o D:\reports\sample-project.md
 ```
 
 ### Streamlit UI
@@ -254,7 +254,7 @@ python.exe -m repopath D:\code\sample-project -o D:\reports\sample-project.md
 1. 启动 `run_streamlit.py`。
 2. 选择本地目录或 GitHub 公开仓库，再输入对应路径或仓库地址；GitHub 模式可选填分支、标签或提交 SHA。
 3. 选择快速、标准或深度模式；需要时在“高级配置”调整 Git 时间范围、最大文件大小、页面结果数量、阅读与评分数量，以及 Markdown 文件清单开关。
-4. 点击“分析仓库”，页面按 Pipeline 阶段显示进度；重新分析会清理上一份报告，失败时展示可执行的处理建议和原始错误详情。
+4. 点击“分析仓库”，分析会在后台线程执行，页面按 Pipeline 阶段自动刷新进度；可点击“停止分析”发出协作式取消请求。
 5. 在概览、推荐阅读、依赖关系、Python、C++、Git 和报告页签中查看结果；可按语言、目录和路径筛选并排序阅读路线、依赖边和 Git 热点。
 6. 在推荐阅读页选择模块，可联动查看核心评分、推荐原因、正向依赖和反向依赖；在报告页下载完整 Markdown 或 JSON。
 
@@ -282,7 +282,7 @@ JSON 报告提供对应的结构化数据，适合后续脚本处理或接入其
 项目使用 pytest，覆盖 Python AST、C++、统一依赖图、阅读洞察、TOML 配置、Git 演进、Provider 契约、CLI 参数、Streamlit 页面、UI 会话状态、预设矩阵和 UI 依赖边界。
 
 ```powershell
-python.exe -m pytest -q
+python -m pytest -q
 ```
 
 GitHub Actions 会在 Python 3.11 至 3.14 上运行测试。
@@ -290,12 +290,12 @@ GitHub Actions 会在 Python 3.11 至 3.14 上运行测试。
 开发时可额外运行 Pyright：
 
 ```powershell
-python.exe -m pyright
+python -m pyright
 ```
 
 ## 七、当前限制
 
-1. GitHub 仅支持公开仓库；可选 `GITHUB_TOKEN` 只用于提高公开 API 额度，不支持私有仓库、GitHub Enterprise、缓存或自动重试。
+1. GitHub 仅支持公开仓库；可选 `GITHUB_TOKEN` 只用于提高公开 API 额度，不支持私有仓库、GitHub Enterprise 或缓存。网络超时和不完整读取会最多重试 3 次。
 2. GitHub 快照最多下载 100 MB 压缩归档，解压后最多读取 10,000 个文件、100 MB 总内容和 10 MB 单文件；不符合限制或包含不安全路径的归档会被拒绝。
 3. 远程快照不包含本地 `.git`，因此 Git 提交趋势、Churn、共同修改和风险热点中的 Git 分不会生成。
 4. C++ 使用正则进行基础静态识别，不替代完整 C++ AST、编译数据库或类型分析。
@@ -304,7 +304,7 @@ python.exe -m pyright
 7. 核心评分和阅读顺序用于辅助导航，不代表代码质量或业务重要性的绝对结论。
 8. 本地 Git 热点受提交粒度、历史完整性、重命名和浅克隆影响；Git 不可用时该部分会缺失。
 9. 文件共同修改统计将单次提交最多前 50 个路径用于组合，避免超大提交产生二次方开销。
-10. Streamlit 页面当前使用同步分析；不提供后台任务、自动刷新或中断按钮。
+10. Streamlit 以后台线程执行分析并每 0.5 秒刷新快照；停止操作是协作式取消，正在执行的单次 Git 命令或网络请求需要返回后才能在下一个检查点停止。
 
 ## 八、开源许可
 

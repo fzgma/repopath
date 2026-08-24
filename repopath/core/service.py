@@ -20,6 +20,7 @@ from .composer import compose_report
 from .context import AnalysisContext
 from .pipeline import default_pipeline
 from .config import load_analysis_options
+from .control import CancellationToken
 
 
 def fetch_github_rate_limit(
@@ -34,7 +35,9 @@ def analyze_repository(
     excluded_paths: set[Path] | None = None,
     options: AnalysisOptions | None = None,
     progress_callback: Callable[[AnalysisProgress], None] | None = None,
+    *,
     github_client: GitHubApiClient | None = None,
+    cancellation_token: CancellationToken | None = None,
 ) -> RepositoryReport:
     """根据本地或 GitHub 来源创建上下文并运行默认 Pipeline。"""
     source = (
@@ -44,16 +47,21 @@ def analyze_repository(
     )
     if source.type is RepositorySourceType.GITHUB:
         return _analyze_github_snapshot(
-            source, options, progress_callback, github_client
+            source,
+            options,
+            progress_callback,
+            github_client,
+            cancellation_token,
         )
     repository = Repository.from_source(source)
     resolved_options = options or load_analysis_options(repository.root)
     context = _build_context(
         repository,
         source,
-        resolved_options,
-        GitProvider(repository),
-        excluded_paths,
+        options=resolved_options,
+        git=GitProvider(repository),
+        excluded_paths=excluded_paths,
+        cancellation_token=cancellation_token,
     )
     return _run_pipeline(context, progress_callback)
 
@@ -63,18 +71,23 @@ def _analyze_github_snapshot(
     options: AnalysisOptions | None,
     progress_callback: Callable[[AnalysisProgress], None] | None,
     github_client: GitHubApiClient | None,
+    cancellation_token: CancellationToken | None,
 ) -> RepositoryReport:
     """物化 GitHub 固定提交并复用本地静态分析 Pipeline。"""
     resolved_options = options or AnalysisOptions()
+    cancellation = cancellation_token or CancellationToken()
+    cancellation.raise_if_cancelled()
     with GitHubSnapshot(source, github_client) as snapshot:
+        cancellation.raise_if_cancelled()
         context = _build_context(
             snapshot.repository,
             snapshot.resolved_source,
-            resolved_options,
-            UnavailableGitProvider(
+            options=resolved_options,
+            git=UnavailableGitProvider(
                 "GitHub 公开仓库快照不提供 Git 演进统计"
             ),
-            None,
+            excluded_paths=None,
+            cancellation_token=cancellation,
         )
         report = _run_pipeline(context, progress_callback)
         report.github_rate_limit = snapshot.rate_limit
@@ -84,9 +97,11 @@ def _analyze_github_snapshot(
 def _build_context(
     repository: Repository,
     source: RepositorySource,
+    *,
     options: AnalysisOptions,
     git: GitProvider | UnavailableGitProvider,
     excluded_paths: set[Path] | None,
+    cancellation_token: CancellationToken | None,
 ) -> AnalysisContext:
     """按统一文件和 Git Provider 构造分析上下文。"""
     options.validate()
@@ -102,6 +117,7 @@ def _build_context(
         git=git,
         options=options,
         excluded_paths=excluded_paths or set(),
+        cancellation=cancellation_token or CancellationToken(),
     )
 
 

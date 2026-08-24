@@ -4,6 +4,9 @@ import io
 import json
 import zipfile
 from collections.abc import Mapping
+from http.client import IncompleteRead
+from typing import Any, cast
+
 import pytest
 
 from repopath.core.service import analyze_repository
@@ -15,6 +18,7 @@ from repopath.provider.github import (
     GitHubRepositoryRef,
     GitHubSnapshot,
     HttpResponse,
+    UrllibHttpTransport,
 )
 from repopath.renderer.json import JsonRenderer
 from repopath.renderer.markdown import MarkdownRenderer
@@ -40,6 +44,68 @@ class FakeTransport:
         self.urls.append(url)
         self.headers.append(headers)
         return self.payloads[url]
+
+
+class _ReadFailureResponse:
+    """首次读取时模拟 GitHub 快照连接提前关闭。"""
+
+    status = 200
+    headers: Mapping[str, str] = {}
+
+    def __enter__(self) -> "_ReadFailureResponse":
+        """返回可作为响应上下文使用的自身。"""
+        return self
+
+    def __exit__(
+        self, exc_type: object, exc_value: object, traceback: object
+    ) -> None:
+        """接受响应上下文退出。"""
+
+    def read(self) -> bytes:
+        """抛出带部分内容的标准库不完整读取异常。"""
+        raise IncompleteRead(b"partial", 10)
+
+
+class _SuccessResponse:
+    """提供一次成功读取所需的最小 HTTP 响应接口。"""
+
+    status = 200
+    headers: Mapping[str, str] = {}
+
+    def __enter__(self) -> "_SuccessResponse":
+        """返回可作为响应上下文使用的自身。"""
+        return self
+
+    def __exit__(
+        self, exc_type: object, exc_value: object, traceback: object
+    ) -> None:
+        """接受响应上下文退出。"""
+
+    def read(self) -> bytes:
+        """返回重试后成功读取到的归档内容。"""
+        return b"complete"
+
+
+class _RetryingOpener:
+    """按顺序返回失败和成功响应的 opener 替身。"""
+
+    def __init__(self) -> None:
+        """初始化两次预期请求的响应序列。"""
+        self.responses: list[
+            _ReadFailureResponse | _SuccessResponse
+        ] = [
+            _ReadFailureResponse(),
+            _SuccessResponse(),
+        ]
+        self.calls = 0
+
+    def open(
+        self, request: object, timeout: float
+    ) -> _ReadFailureResponse | _SuccessResponse:
+        """返回下一次预设响应并记录调用次数。"""
+        response = self.responses[self.calls]
+        self.calls += 1
+        return response
 
 
 def _json_response(payload: object) -> HttpResponse:
@@ -203,3 +269,15 @@ def test_github_client_sends_optional_token_header() -> None:
     )
 
     assert transport.headers[0]["Authorization"] == "Bearer test-token"
+
+
+def test_urllib_transport_retries_an_incomplete_response() -> None:
+    """验证 zipball 下载中断后会重新请求并返回完整响应。"""
+    transport = UrllibHttpTransport(retry_delay=0)
+    opener = _RetryingOpener()
+    transport.opener = cast(Any, opener)
+
+    response = transport.get("https://example.test/archive", {}, 1)
+
+    assert response.body == b"complete"
+    assert opener.calls == 2

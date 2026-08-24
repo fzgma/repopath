@@ -9,6 +9,7 @@ from ..provider.base import (
     RepositoryFileProvider,
     RepositoryGitProvider,
 )
+from .control import CancellationToken
 
 
 @dataclass
@@ -21,3 +22,6 @@ class AnalysisContext:
     git: RepositoryGitProvider
     options: AnalysisOptions = field(default_factory=AnalysisOptions)
     excluded_paths: set[Path] = field(default_factory=set[Path])
+    cancellation: CancellationToken = field(
+        default_factory=CancellationToken
+    )

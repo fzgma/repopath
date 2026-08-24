@@ -3,47 +3,34 @@
 from collections.abc import Callable
 from math import ceil
 from pathlib import Path
-from time import monotonic, perf_counter
 from typing import Any, TypeAlias
 
 from ...model.options import AnalysisOptions
-from ...model.report import RepositoryReport
 from ...model.repository import (
     GitHubRateLimit,
     RepositorySource,
     RepositorySourceType,
 )
-from ...model.result import AnalysisProgress
 from .profiles import (
     PROFILE_SPECS,
     label_for_profile,
     profile_for_label,
 )
+from .runtime import (
+    AnalysisRuntime,
+    AnalyzeRepository,
+    get_analysis_runtime,
+)
 from .state import (
     UiRunState,
-    begin_run,
-    clear_analysis_result,
     clear_github_rate_limit,
-    fail_run,
-    finish_run,
     get_github_rate_limit,
-    get_snapshot,
     save_github_rate_limit,
-    update_progress,
 )
 from .views import render_snapshot
 
 
 StreamlitApi: TypeAlias = Any
-AnalyzeRepository: TypeAlias = Callable[
-    [
-        str | Path | RepositorySource,
-        set[Path] | None,
-        AnalysisOptions | None,
-        Callable[[AnalysisProgress], None] | None,
-    ],
-    RepositoryReport,
-]
 LoadOptions: TypeAlias = Callable[[Path], AnalysisOptions]
 EnsureConfig: TypeAlias = Callable[[Path], Path]
 FetchGitHubRateLimit: TypeAlias = Callable[[], GitHubRateLimit]
@@ -53,8 +40,6 @@ _GIT_PERIODS = {
     "最近 90 天": "90",
 }
 _SOURCE_TYPES = ("本地目录", "GitHub 公开仓库")
-_ANALYSIS_DEBOUNCE_SECONDS = 1.0
-_LAST_ANALYSIS_COMPLETED_AT_KEY = "repopath.last_analysis_completed_at"
 
 
 def render_application(
@@ -64,8 +49,9 @@ def render_application(
     ensure_config: EnsureConfig,
     fetch_rate_limit: FetchGitHubRateLimit,
 ) -> None:
-    """渲染分析表单、执行同步任务并展示会话结果。"""
-    snapshot = get_snapshot(st.session_state)
+    """渲染分析表单并轮询当前会话的后台任务快照。"""
+    runtime = get_analysis_runtime(st.session_state, analyze)
+    snapshot = runtime.snapshot()
     st.title("RepoPath")
     previous_source = (
         snapshot.report.source if snapshot.report is not None else None
@@ -174,7 +160,7 @@ def render_application(
                 key=f"include-file-list:{source_key}",
             )
         actions = st.columns(2) if is_github else [st]
-        actions_disabled = _is_analysis_start_blocked(st)
+        actions_disabled = snapshot.active
         submitted = actions[0].form_submit_button(
             "分析仓库",
             type="primary",
@@ -186,21 +172,25 @@ def render_application(
                 "查询限额",
                 width="stretch",
                 disabled=actions_disabled,
-                help="仅读取当前 Token 或公网 IP 的 GitHub Core API 额度；不读取仓库、不执行分析，且 GitHub 不将该端点计入 Core API 额度。",
+                help=(
+                    "仅读取当前 Token 或公网 IP 的 GitHub Core API "
+                    "额度；不读取仓库、不执行分析，且 GitHub 不将"
+                    "该端点计入 Core API 额度。"
+                ),
             )
             if is_github
             else False
         )
     if rate_limit_submitted:
-        if not _is_analysis_start_blocked(st):
-            clear_analysis_result(st.session_state)
+        if not runtime.snapshot().active:
             clear_github_rate_limit(st.session_state)
-            _fetch_rate_limit(st, fetch_rate_limit)
+            _fetch_rate_limit(st, fetch_rate_limit, runtime)
             _render_rate_limit_result(st)
             return
     if submitted:
-        _run_analysis(
-            st=st,
+        clear_github_rate_limit(st.session_state)
+        _start_analysis(
+            runtime=runtime,
             source=source,
             reference=reference,
             is_github=is_github,
@@ -210,13 +200,22 @@ def render_application(
             result_limit=int(result_limit),
             reading_limit=int(reading_limit),
             include_file_list=include_file_list,
-            analyze=analyze,
             load_options=load_options,
             ensure_config=ensure_config,
         )
+    current = runtime.snapshot()
+    if current.active:
+        stop = st.button(
+            "停止分析",
+            disabled=current.state is UiRunState.CANCELLING,
+            help="请求后台任务在下一个安全检查点停止，不会强制终止线程。",
+            width="content",
+        )
+        if stop:
+            runtime.request_cancel()
     if is_github:
         _render_rate_limit_result(st)
-    render_snapshot(get_snapshot(st.session_state), st)
+    render_snapshot(runtime.snapshot(), st)
 
 
 def _default_options(
@@ -264,9 +263,10 @@ def _megabytes(size: int | None) -> int:
 def _fetch_rate_limit(
     st: StreamlitApi,
     fetch_rate_limit: FetchGitHubRateLimit,
+    runtime: AnalysisRuntime,
 ) -> None:
     """执行独立的 GitHub API 额度查询并保留结果。"""
-    if _is_analysis_start_blocked(st):
+    if runtime.snapshot().active:
         return
     try:
         save_github_rate_limit(st.session_state, fetch_rate_limit())
@@ -290,9 +290,9 @@ def _render_rate_limit_result(st: StreamlitApi) -> None:
     )
 
 
-def _run_analysis(
+def _start_analysis(
     *,
-    st: StreamlitApi,
+    runtime: AnalysisRuntime,
     source: str,
     reference: str | None,
     is_github: bool,
@@ -302,17 +302,12 @@ def _run_analysis(
     result_limit: int,
     reading_limit: int,
     include_file_list: bool,
-    analyze: AnalyzeRepository,
     load_options: LoadOptions,
     ensure_config: EnsureConfig,
 ) -> None:
-    """解析 UI 配置、更新快照并执行一次同步分析。"""
-    if _is_analysis_start_blocked(st):
+    """解析页面配置并向会话后台运行时提交分析任务。"""
+    if runtime.snapshot().active:
         return
-    clear_analysis_result(st.session_state)
-    clear_github_rate_limit(st.session_state)
-    progress: Any = None
-    run_started = False
     try:
         if is_github:
             analysis_source: Path | RepositorySource = (
@@ -342,39 +337,10 @@ def _run_analysis(
             reading_limit=reading_limit,
             include_file_list=include_file_list,
         )
-        begin_run(st.session_state, source, options)
-        run_started = True
-        progress = st.progress(0, text="正在准备分析")
-        started_at = perf_counter()
-
-        def on_progress(event: AnalysisProgress) -> None:
-            """将 Pipeline 阶段事件写入会话状态和进度条。"""
-            current = update_progress(st.session_state, event)
-            progress.progress(
-                current.progress_percent, text=current.current_stage
-            )
-
-        report = analyze(analysis_source, None, options, on_progress)
-        report.elapsed_seconds = round(perf_counter() - started_at, 6)
-        finish_run(st.session_state, report)
-        progress.empty()
+        runtime.start(
+            source=source,
+            analysis_source=analysis_source,
+            options=options,
+        )
     except Exception as exc:
-        if progress is not None:
-            progress.empty()
-        fail_run(st.session_state, exc)
-    finally:
-        if run_started:
-            st.session_state[_LAST_ANALYSIS_COMPLETED_AT_KEY] = (
-                monotonic()
-            )
-
-
-def _is_analysis_start_blocked(st: StreamlitApi) -> bool:
-    """判断分析是否运行中或刚完成而应忽略重复提交。"""
-    if get_snapshot(st.session_state).state is UiRunState.RUNNING:
-        return True
-    completed_at = st.session_state.get(_LAST_ANALYSIS_COMPLETED_AT_KEY)
-    return (
-        isinstance(completed_at, float)
-        and monotonic() - completed_at < _ANALYSIS_DEBOUNCE_SECONDS
-    )
+        runtime.record_error(source, exc)

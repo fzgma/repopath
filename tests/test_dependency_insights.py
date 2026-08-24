@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from repopath.core.service import analyze_repository
+from repopath.renderer.markdown import MarkdownRenderer
 
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "graph_repo"
@@ -16,6 +17,7 @@ def test_dependency_graph_detects_cycles_and_entry_paths() -> None:
         set(cycle) for cycle in report.dependencies.cycles
     ]
     assert "python:isolated" in report.dependencies.isolated_nodes
+    assert "循环成员（强连通组" in MarkdownRenderer().render(report)
     assert "directory:pkg" in report.dependencies.directory_nodes
     assert report.dependencies.entry_nodes == ["python:entry"]
     scores = {
@@ -47,6 +49,30 @@ def test_reading_order_falls_back_to_scores_without_entry_points(
     assert not report.dependencies.entry_nodes
     assert report.insights.reading_order[0].path == "module.py"
     assert report.insights.reading_order[0].entry_distance is None
+
+
+def test_type_checking_import_does_not_create_a_runtime_cycle(
+    tmp_path: Path,
+) -> None:
+    """验证类型检查专用导入不会被错误识别为循环依赖。"""
+    (tmp_path / "adapter.py").write_text(
+        "from typing import TYPE_CHECKING\n"
+        "\n"
+        "if TYPE_CHECKING:\n"
+        "    from service import Service\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "service.py").write_text(
+        "import adapter\n",
+        encoding="utf-8",
+    )
+
+    report = analyze_repository(tmp_path)
+
+    assert not report.dependencies.cycles
+    assert report.python.imports_by_file[tmp_path / "adapter.py"] == [
+        "typing"
+    ]
 
 
 def test_reading_order_supports_multiple_entry_points(

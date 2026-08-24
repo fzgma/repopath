@@ -9,7 +9,9 @@ import tempfile
 import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
+from http.client import IncompleteRead
 from pathlib import Path, PurePosixPath
+from time import sleep
 from typing import Protocol, cast
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
@@ -24,7 +26,9 @@ from ..model.repository import (
 
 
 GITHUB_API_URL = "https://api.github.com"
-DEFAULT_TIMEOUT_SECONDS = 15.0
+DEFAULT_TIMEOUT_SECONDS = 30.0
+MAX_REQUEST_ATTEMPTS = 3
+RETRY_DELAY_SECONDS = 0.5
 MAX_SNAPSHOT_FILES = 10_000
 MAX_SNAPSHOT_BYTES = 100 * 1024 * 1024
 MAX_ARCHIVE_BYTES = 100 * 1024 * 1024
@@ -57,34 +61,51 @@ class HttpTransport(Protocol):
 class UrllibHttpTransport:
     """使用可复用的标准库 opener 发送 GitHub API 请求。"""
 
-    def __init__(self) -> None:
-        """创建在同一客户端生命周期内复用的 HTTP opener。"""
+    def __init__(
+        self,
+        *,
+        attempts: int = MAX_REQUEST_ATTEMPTS,
+        retry_delay: float = RETRY_DELAY_SECONDS,
+    ) -> None:
+        """创建复用连接并带有限重试的 HTTP opener。"""
         self.opener: OpenerDirector = build_opener()
+        self.attempts = max(1, attempts)
+        self.retry_delay = max(0.0, retry_delay)
 
     def get(
         self, url: str, headers: Mapping[str, str], timeout: float
     ) -> HttpResponse:
         """发送请求并将 HTTP 和网络失败统一为客户端错误。"""
         request = Request(url, headers=dict(headers), method="GET")
-        try:
-            with self.opener.open(request, timeout=timeout) as response:
+        last_error: BaseException | None = None
+        for attempt in range(self.attempts):
+            try:
+                with self.opener.open(
+                    request, timeout=timeout
+                ) as response:
+                    return HttpResponse(
+                        response.status,
+                        dict(response.headers.items()),
+                        response.read(),
+                    )
+            except HTTPError as exc:
                 return HttpResponse(
-                    response.status,
-                    dict(response.headers.items()),
-                    response.read(),
+                    exc.code,
+                    dict(exc.headers.items()) if exc.headers else {},
+                    exc.read(),
                 )
-        except HTTPError as exc:
-            return HttpResponse(
-                exc.code,
-                dict(exc.headers.items()) if exc.headers else {},
-                exc.read(),
-            )
-        except URLError as exc:
-            raise GitHubApiError(
-                f"无法连接 GitHub API：{exc.reason}"
-            ) from exc
-        except OSError as exc:
-            raise GitHubApiError(f"GitHub API 请求失败：{exc}") from exc
+            except (
+                IncompleteRead,
+                URLError,
+                TimeoutError,
+                OSError,
+            ) as exc:
+                last_error = exc
+                if attempt + 1 < self.attempts:
+                    sleep(self.retry_delay)
+        raise GitHubApiError(
+            f"GitHub 请求传输中断，已重试 {self.attempts} 次"
+        ) from last_error
 
 
 @dataclass(frozen=True)

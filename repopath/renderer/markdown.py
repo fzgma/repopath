@@ -1,5 +1,6 @@
 """Markdown 报告 Renderer。"""
 
+from ..model.file import FileRecord
 from ..model.report import RepositoryReport
 
 
@@ -11,6 +12,16 @@ def markdown_cell(value: object) -> str:
 def markdown_row(*cells: object) -> str:
     """将已转义的单元格组合为 Markdown 表格行。"""
     return "| " + " | ".join(str(cell) for cell in cells) + " |"
+
+
+def _file_sort_key(file: FileRecord) -> tuple[int, str]:
+    """返回 Markdown 文件清单的稳定排序键。"""
+    return file.non_empty_lines, str(file.path)
+
+
+def _markdown_cycle_member(node: str) -> str:
+    """将循环成员格式化为 Markdown 嵌套列表项。"""
+    return f"  - `{markdown_cell(node)}`"
 
 
 class MarkdownRenderer:
@@ -48,9 +59,8 @@ class MarkdownRenderer:
                 f"- 仓库来源：{markdown_cell(report.source.location)}"
             )
             if report.source.reference:
-                lines.append(
-                    f"- 固定提交：`{markdown_cell(report.source.reference)}`"
-                )
+                reference = markdown_cell(report.source.reference)
+                lines.append(f"- 固定提交：`{reference}`")
         if report.github_rate_limit is not None:
             rate_limit = report.github_rate_limit
             lines.extend(
@@ -272,13 +282,17 @@ class MarkdownRenderer:
                 )
             lines.extend(["", "### 循环依赖", ""])
             if graph.cycles:
-                lines.extend(
-                    "- "
-                    + " -> ".join(
-                        f"`{markdown_cell(node)}`" for node in cycle
+                for index, cycle in enumerate(
+                    graph.cycles[:limit], start=1
+                ):
+                    lines.append(
+                        "- 循环成员（强连通组 "
+                        f"{index}，{len(cycle)} 个模块）："
                     )
-                    for cycle in graph.cycles[:limit]
-                )
+                    members = [
+                        _markdown_cycle_member(node) for node in cycle
+                    ]
+                    lines.extend(members)
             else:
                 lines.append("未检测到循环依赖。")
             lines.extend(["", "### 孤立模块", ""])
@@ -565,7 +579,7 @@ class MarkdownRenderer:
             )
             for file in sorted(
                 files,
-                key=lambda item: (item.non_empty_lines, str(item.path)),
+                key=_file_sort_key,
                 reverse=True,
             ):
                 file_path = repository.relative_path(file.path)
@@ -583,4 +597,5 @@ class MarkdownRenderer:
         """返回带时区的当前时间字符串。"""
         from datetime import datetime
 
-        return datetime.now().astimezone().isoformat(timespec="seconds")
+        timestamp = datetime.now().astimezone()
+        return timestamp.isoformat(timespec="seconds")

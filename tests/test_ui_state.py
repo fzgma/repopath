@@ -1,28 +1,12 @@
 """Streamlit UI 运行状态和预设测试。"""
 
-from pathlib import Path
-
 from repopath.interface.ui.profiles import (
     PROFILE_SPECS,
     label_for_profile,
     profile_for_label,
 )
-from repopath.interface.ui.state import (
-    UiRunState,
-    begin_run,
-    fail_run,
-    finish_run,
-    get_snapshot,
-    update_progress,
-)
+from repopath.interface.ui.state import AnalysisSnapshot, UiRunState
 from repopath.model.options import AnalysisOptions
-from repopath.model.report import RepositoryReport
-from repopath.model.repository import Repository
-from repopath.model.result import (
-    AnalyzerName,
-    AnalysisProgress,
-    AnalysisStatus,
-)
 
 
 def test_profile_specs_match_core_analyzer_matrix() -> None:
@@ -44,30 +28,21 @@ def test_profile_specs_match_core_analyzer_matrix() -> None:
     assert label_for_profile("custom") == "深度"
 
 
-def test_snapshot_replaces_old_report_when_a_new_run_fails(
-    tmp_path: Path,
-) -> None:
-    """验证重新分析失败后不会继续显示旧报告。"""
-    state: dict[str, object] = {}
-    options = AnalysisOptions.for_profile("deep")
-    report = RepositoryReport(
-        repository=Repository.from_path(tmp_path), options=options
-    )
+def test_snapshot_marks_only_active_runtime_states_as_running() -> None:
+    """验证快照仅将准备、运行和取消中视为活跃任务。"""
+    active = [
+        UiRunState.PENDING,
+        UiRunState.RUNNING,
+        UiRunState.CANCELLING,
+    ]
+    inactive = [
+        UiRunState.IDLE,
+        UiRunState.CANCELLED,
+        UiRunState.FINISHED,
+        UiRunState.ERROR,
+    ]
 
-    finish_run(state, report)
-    begin_run(state, str(tmp_path), options)
-    running = update_progress(
-        state,
-        AnalysisProgress(
-            AnalyzerName.FILES, 1, 3, 33, AnalysisStatus.RUNNING
-        ),
+    assert all(AnalysisSnapshot(state=item).active for item in active)
+    assert not any(
+        AnalysisSnapshot(state=item).active for item in inactive
     )
-    failed = fail_run(state, NotADirectoryError("missing"))
-
-    assert running.state is UiRunState.RUNNING
-    assert running.progress_percent == 33
-    assert failed.state is UiRunState.ERROR
-    assert failed.report is None
-    assert failed.error is not None
-    assert failed.error.category == "路径"
-    assert get_snapshot(state) == failed

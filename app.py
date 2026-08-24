@@ -24,13 +24,19 @@ def main() -> None:
             "python.exe -m pip install -r requirements.txt"
         ) from exc
     st.set_page_config(page_title="RepoPath", layout="wide")
-    render_application(
-        st,
-        analyze_repository,
-        load_analysis_options,
-        ensure_default_config,
-        fetch_github_rate_limit,
-    )
+
+    @st.fragment(run_every=0.5)
+    def render_workspace() -> None:
+        """在 UI 主线程中定时轮询并渲染分析工作区。"""
+        render_application(
+            st,
+            analyze_repository,
+            load_analysis_options,
+            ensure_default_config,
+            fetch_github_rate_limit,
+        )
+
+    render_workspace()
 
 
 if __name__ == "__main__":

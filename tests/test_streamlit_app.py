@@ -2,8 +2,17 @@
 
 from pathlib import Path
 from shutil import copytree
+from time import monotonic, sleep
 
 from streamlit.testing.v1 import AppTest
+
+
+def _wait_for_analysis(app: AppTest) -> None:
+    """重复运行测试页面直到后台分析渲染结果。"""
+    deadline = monotonic() + 5
+    while not app.tabs and monotonic() < deadline:
+        sleep(0.05)
+        app.run(timeout=10)
 
 
 def test_streamlit_app_starts_without_running_an_analysis() -> None:
@@ -31,6 +40,7 @@ def test_streamlit_app_renders_a_deep_analysis(tmp_path: Path) -> None:
     app.run(timeout=10)
     app.button[0].click()
     app.run(timeout=30)
+    _wait_for_analysis(app)
 
     assert not app.exception
     assert [tab.label for tab in app.tabs] == [
@@ -43,6 +53,7 @@ def test_streamlit_app_renders_a_deep_analysis(tmp_path: Path) -> None:
         "报告",
     ]
     assert len(app.metric) >= 6
+    assert "停止分析" not in [button.label for button in app.button]
 
 
 def test_streamlit_app_shows_rate_limit_query_for_github_only() -> None:

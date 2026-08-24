@@ -57,6 +57,7 @@ class CppAnalyzer(Analyzer):
         local_names = {file.path.name: file.path for file in files}
 
         for file in files:
+            context.cancellation.raise_if_cancelled()
             source = context.filesystem.read_text(file.path)
             if source is None:
                 warnings.append(
