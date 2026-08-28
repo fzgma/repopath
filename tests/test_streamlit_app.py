@@ -10,9 +10,16 @@ from streamlit.testing.v1 import AppTest
 def _wait_for_analysis(app: AppTest) -> None:
     """重复运行测试页面直到后台分析渲染结果。"""
     deadline = monotonic() + 5
-    while not app.tabs and monotonic() < deadline:
+    while not _has_report_view(app) and monotonic() < deadline:
         sleep(0.05)
         app.run(timeout=10)
+
+
+def _has_report_view(app: AppTest) -> bool:
+    """判断报告视图选择器是否已经渲染。"""
+    return any(
+        control.label == "报告视图" for control in app.segmented_control
+    )
 
 
 def test_streamlit_app_starts_without_running_an_analysis() -> None:
@@ -30,7 +37,7 @@ def test_streamlit_app_starts_without_running_an_analysis() -> None:
 
 
 def test_streamlit_app_renders_a_deep_analysis(tmp_path: Path) -> None:
-    """验证深度分析可以渲染全部结果页签且不产生页面异常。"""
+    """验证深度分析可以切换报告视图且不产生页面异常。"""
     root = Path(__file__).parents[1]
     fixture = tmp_path / "mixed_repo"
     copytree(root / "tests" / "fixtures" / "mixed_repo", fixture)
@@ -43,15 +50,13 @@ def test_streamlit_app_renders_a_deep_analysis(tmp_path: Path) -> None:
     _wait_for_analysis(app)
 
     assert not app.exception
-    assert [tab.label for tab in app.tabs] == [
-        "概览",
-        "推荐阅读",
-        "依赖关系",
-        "Python",
-        "C++",
-        "Git",
-        "报告",
-    ]
+    assert not app.tabs
+    report_view = next(
+        control
+        for control in app.segmented_control
+        if control.label == "报告视图"
+    )
+    assert report_view.value == "概览"
     assert len(app.metric) >= 6
     assert "停止分析" not in [button.label for button in app.button]
 

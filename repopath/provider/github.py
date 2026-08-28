@@ -23,6 +23,7 @@ from ..model.repository import (
     RepositorySource,
     RepositorySourceType,
 )
+from ..model.options import GitHubSnapshotLimits
 
 
 GITHUB_API_URL = "https://api.github.com"
@@ -250,7 +251,11 @@ class GitHubApiClient:
         return GitHubCommit(sha=sha)
 
     def archive_content(
-        self, repository: GitHubRepositoryRef, sha: str
+        self,
+        repository: GitHubRepositoryRef,
+        sha: str,
+        *,
+        max_bytes: int = MAX_ARCHIVE_BYTES,
     ) -> bytes:
         """下载固定提交的 zipball，避免逐文件消耗 API 配额。"""
         response = self.transport.get(
@@ -263,7 +268,7 @@ class GitHubApiClient:
         self._raise_for_error(response)
         if not response.body:
             raise GitHubApiError("GitHub API 返回了空的仓库归档")
-        if len(response.body) > MAX_ARCHIVE_BYTES:
+        if len(response.body) > max_bytes:
             raise GitHubApiError("GitHub 仓库归档超过下载大小限制")
         return response.body
 
@@ -290,7 +295,7 @@ class GitHubApiClient:
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "RepoPath/0.5.0",
+            "User-Agent": "RepoPath/0.7.0",
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -323,12 +328,15 @@ class GitHubSnapshot:
         self,
         source: RepositorySource,
         client: GitHubApiClient | None = None,
+        limits: GitHubSnapshotLimits | None = None,
     ) -> None:
         """保存待读取的 GitHub 来源和 API 客户端。"""
         if source.type is not RepositorySourceType.GITHUB:
             raise ValueError("GitHub 快照只支持 GitHub 仓库来源")
         self.source = source
         self.client = client or GitHubApiClient()
+        self.limits = limits or GitHubSnapshotLimits()
+        self.limits.validate()
         self._temporary_directory: (
             tempfile.TemporaryDirectory[str] | None
         ) = None
@@ -349,14 +357,18 @@ class GitHubSnapshot:
         )
         commit = self.client.resolve_commit(repository_ref, reference)
         archive_content = self.client.archive_content(
-            repository_ref, commit.sha
+            repository_ref,
+            commit.sha,
+            max_bytes=self.limits.archive_max_bytes,
         )
         self._temporary_directory = tempfile.TemporaryDirectory(
             prefix="repopath-github-"
         )
         root = Path(self._temporary_directory.name)
         try:
-            self._extract_archive(root, archive_content)
+            self._extract_archive(
+                root, archive_content, limits=self.limits
+            )
         except Exception:
             self._temporary_directory.cleanup()
             self._temporary_directory = None
@@ -378,13 +390,18 @@ class GitHubSnapshot:
             self._temporary_directory = None
 
     @staticmethod
-    def _extract_archive(root: Path, archive_content: bytes) -> None:
+    def _extract_archive(
+        root: Path,
+        archive_content: bytes,
+        *,
+        limits: GitHubSnapshotLimits | None = None,
+    ) -> None:
         """校验 zipball 路径和规模后安全写入临时目录。"""
         try:
             with zipfile.ZipFile(
                 io.BytesIO(archive_content)
             ) as archive:
-                files = _archive_files(archive)
+                files = _archive_files(archive, limits=limits)
                 for entry, path in files:
                     destination = root / PurePosixPath(path)
                     destination.parent.mkdir(
@@ -412,12 +429,16 @@ def _is_safe_repository_path(path: str) -> bool:
 
 def _archive_files(
     archive: zipfile.ZipFile,
+    *,
+    limits: GitHubSnapshotLimits | None = None,
 ) -> list[tuple[zipfile.ZipInfo, str]]:
     """筛选安全的归档文件并校验解压后的资源上限。"""
     root_name: str | None = None
     total_size = 0
     files: list[tuple[zipfile.ZipInfo, str]] = []
     paths: set[str] = set()
+    active_limits = limits or GitHubSnapshotLimits()
+    active_limits.validate()
     for entry in archive.infolist():
         if entry.is_dir() or _is_symbolic_link(entry):
             continue
@@ -431,7 +452,7 @@ def _archive_files(
         path = PurePosixPath(*parts[1:]).as_posix()
         if not _is_safe_repository_path(path):
             raise GitHubApiError("GitHub 仓库归档包含不安全的文件路径")
-        if entry.file_size > MAX_FILE_BYTES:
+        if entry.file_size > active_limits.file_max_bytes:
             raise GitHubApiError(
                 f"文件 {path} 超过远程快照单文件大小限制"
             )
@@ -440,9 +461,9 @@ def _archive_files(
         paths.add(path)
         files.append((entry, path))
         total_size += entry.file_size
-        if len(files) > MAX_SNAPSHOT_FILES:
+        if len(files) > active_limits.file_limit:
             raise GitHubApiError("仓库文件数超过远程快照限制")
-        if total_size > MAX_SNAPSHOT_BYTES:
+        if total_size > active_limits.content_max_bytes:
             raise GitHubApiError("仓库文件总大小超过远程快照限制")
     return files
 

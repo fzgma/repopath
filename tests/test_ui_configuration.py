@@ -171,6 +171,40 @@ def test_ui_submits_github_source_without_writing_config(
     assert not (tmp_path / ".repopath.toml").exists()
 
 
+def test_ui_submits_github_snapshot_limits(
+    tmp_path: Path,
+) -> None:
+    """验证 UI 高级配置会提交 GitHub 快照资源上限。"""
+    analyzer = _RecordingAnalyzer(tmp_path)
+    runtime = AnalysisRuntime(analyzer)
+
+    _start_analysis(
+        runtime=runtime,
+        source="example/demo",
+        reference=None,
+        is_github=True,
+        label="深度",
+        git_label="全部历史",
+        max_file_size_mb=0,
+        result_limit=10,
+        reading_limit=10,
+        include_file_list=False,
+        github_archive_max_mb=20,
+        github_file_limit=2000,
+        github_content_max_mb=30,
+        github_file_max_mb=4,
+        load_options=load_analysis_options,
+        ensure_config=ensure_default_config,
+    )
+    _wait_for_runtime(runtime)
+
+    options = analyzer.options[0]
+    assert options.github_archive_max_bytes == 20 * 1024 * 1024
+    assert options.github_file_limit == 2000
+    assert options.github_content_max_bytes == 30 * 1024 * 1024
+    assert options.github_file_max_bytes == 4 * 1024 * 1024
+
+
 def test_ui_queries_rate_limit_only_while_runtime_is_idle(
     tmp_path: Path,
 ) -> None:

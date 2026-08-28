@@ -77,7 +77,11 @@ def _analyze_github_snapshot(
     resolved_options = options or AnalysisOptions()
     cancellation = cancellation_token or CancellationToken()
     cancellation.raise_if_cancelled()
-    with GitHubSnapshot(source, github_client) as snapshot:
+    with GitHubSnapshot(
+        source,
+        github_client,
+        limits=resolved_options.github_snapshot_limits,
+    ) as snapshot:
         cancellation.raise_if_cancelled()
         context = _build_context(
             snapshot.repository,

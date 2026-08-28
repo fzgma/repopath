@@ -47,41 +47,81 @@ def build_parser() -> argparse.ArgumentParser:
         help="报告输出路径",
     )
     parser.add_argument(
+        "-f",
         "--format",
         choices=("markdown", "json"),
         default=None,
         help="报告格式，默认根据输出扩展名判断",
     )
     parser.add_argument(
+        "-d",
+        "--detail",
+        choices=("summary", "full"),
+        default="summary",
+        help="Markdown 详情级别，默认摘要；JSON 始终输出完整结构",
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        dest="detail",
+        action="store_const",
+        const="full",
+        default=argparse.SUPPRESS,
+        help="输出完整 Markdown，等同于 --detail full",
+    )
+    parser.add_argument(
+        "-c",
         "--config",
         help="配置文件路径，默认读取仓库根目录 .repopath.toml",
     )
     parser.add_argument(
+        "-p",
         "--profile",
         choices=("fast", "standard", "deep"),
         help="分析模式",
     )
     parser.add_argument(
+        "-e",
         "--exclude",
         action="append",
         default=[],
         help="追加排除路径模式，可重复使用",
     )
     parser.add_argument(
-        "--max-file-size", type=int, help="可读取文本文件的最大字节数"
+        "-m",
+        "--max-file-size",
+        type=int,
+        help="可读取文本文件的最大字节数",
     )
     parser.add_argument(
+        "-g",
         "--git-period",
         choices=("all", "30", "90"),
         help="Git 历史时间范围",
     )
     parser.add_argument(
-        "--result-limit", type=int, help="Markdown 报告每类列表最大数量"
+        "-n",
+        "--result-limit",
+        type=int,
+        help="Markdown 报告每类列表最大数量",
     )
     parser.add_argument(
-        "--reading-limit", type=int, help="推荐阅读和评分明细最大数量"
+        "-l",
+        "--reading-limit",
+        type=int,
+        help="推荐阅读和评分明细最大数量",
     )
     parser.add_argument(
+        "--github-limits",
+        action="append",
+        metavar="KEY=VALUE",
+        help=(
+            "GitHub 快照限制，可重复设置："
+            "archive_mb、files、content_mb、file_mb"
+        ),
+    )
+    parser.add_argument(
+        "-i",
         "--include-file-list",
         dest="include_file_list",
         action="store_true",
@@ -159,7 +199,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.config is None:
             ensure_default_config(config_root)
-        options = _resolve_options(config_root, args)
+        github_limits = _parse_github_limits(args.github_limits)
+        options = _resolve_options(
+            config_root, args, github_limits=github_limits
+        )
     except AnalysisConfigError as exc:
         parser.error(str(exc))
     excluded_paths = {output} if local_repository is not None else None
@@ -170,10 +213,18 @@ def main(argv: list[str] | None = None) -> int:
         if output_format == "json"
         else MarkdownRenderer()
     )
-    output.write_text(renderer.render(report), encoding="utf-8")
-    print(
-        f"分析完成：扫描 {len(report.files)} 个文件，报告已写入 {output}"
-    )
+    if isinstance(renderer, MarkdownRenderer):
+        content = renderer.render(report, detail=args.detail)
+    else:
+        content = renderer.render(report)
+    output.write_text(content, encoding="utf-8")
+    print(f"分析完成：扫描 {len(report.files)} 个文件")
+    print(f"分析模式：{options.profile}；报告已写入 {output}")
+    if not options.dependencies_enabled or not options.git_enabled:
+        print(
+            "提示：当前模式未启用完整导航；需要依赖、阅读路线和 Git "
+            "热点时使用 --profile deep。"
+        )
     return 0
 
 
@@ -221,7 +272,10 @@ def _looks_like_github_location(value: str) -> bool:
 
 
 def _resolve_options(
-    root: Path, args: argparse.Namespace
+    root: Path,
+    args: argparse.Namespace,
+    *,
+    github_limits: dict[str, int] | None = None,
 ) -> AnalysisOptions:
     """按默认值、配置文件和 CLI 参数顺序合并分析选项。"""
     options = load_analysis_options(root, args.config)
@@ -267,6 +321,40 @@ def _resolve_options(
             git_enabled=args.git_enabled,
             dependencies_enabled=dependencies_enabled,
             insights_enabled=insights_enabled,
+            **(github_limits or {}),
         )
     except ValueError as exc:
         raise AnalysisConfigError(str(exc)) from exc
+
+
+def _parse_github_limits(
+    values: list[str] | None,
+) -> dict[str, int]:
+    """解析 CLI 的 GitHub 快照限制键值参数。"""
+    if not values:
+        return {}
+    keys = {
+        "archive_mb": "github_archive_max_bytes",
+        "files": "github_file_limit",
+        "content_mb": "github_content_max_bytes",
+        "file_mb": "github_file_max_bytes",
+    }
+    parsed: dict[str, int] = {}
+    for item in values:
+        key, separator, raw = item.partition("=")
+        if not separator or key not in keys:
+            raise AnalysisConfigError(
+                "--github-limits 必须使用 archive_mb/files/content_mb/file_mb=数值"
+            )
+        try:
+            number = int(raw)
+        except ValueError as exc:
+            raise AnalysisConfigError(
+                f"GitHub 快照限制 {key} 必须是整数"
+            ) from exc
+        if number <= 0:
+            raise AnalysisConfigError("GitHub 快照限制必须大于 0")
+        parsed[keys[key]] = (
+            number * 1024 * 1024 if key.endswith("_mb") else number
+        )
+    return parsed

@@ -48,8 +48,8 @@ def render_application(
     load_options: LoadOptions,
     ensure_config: EnsureConfig,
     fetch_rate_limit: FetchGitHubRateLimit,
-) -> None:
-    """渲染分析表单并轮询当前会话的后台任务快照。"""
+) -> bool:
+    """渲染分析表单和当前会话的非进度页面。"""
     runtime = get_analysis_runtime(st.session_state, analyze)
     snapshot = runtime.snapshot()
     st.title("RepoPath")
@@ -103,6 +103,10 @@ def render_application(
             else None
         )
         source_key = f"{source_type}:{source}"
+        github_archive_max_mb: int | None = None
+        github_file_limit: int | None = None
+        github_content_max_mb: int | None = None
+        github_file_max_mb: int | None = None
         configured_options = _default_options(
             source, load_options, is_github
         )
@@ -159,6 +163,42 @@ def render_application(
                 help="默认不包含，以避免 Markdown 报告在大型仓库中变得过长。",
                 key=f"include-file-list:{source_key}",
             )
+            if is_github:
+                st.caption("GitHub 快照限制")
+                github_archive_max_mb = st.number_input(
+                    "最大归档大小（MB）",
+                    min_value=1,
+                    value=_megabytes(
+                        configured_options.github_archive_max_bytes
+                    ),
+                    step=10,
+                    key=f"github-archive-max:{source_key}",
+                )
+                github_file_limit = st.number_input(
+                    "最大文件数",
+                    min_value=1,
+                    value=configured_options.github_file_limit,
+                    step=1000,
+                    key=f"github-file-limit:{source_key}",
+                )
+                github_content_max_mb = st.number_input(
+                    "最大解压内容（MB）",
+                    min_value=1,
+                    value=_megabytes(
+                        configured_options.github_content_max_bytes
+                    ),
+                    step=10,
+                    key=f"github-content-max:{source_key}",
+                )
+                github_file_max_mb = st.number_input(
+                    "最大单文件（MB）",
+                    min_value=1,
+                    value=_megabytes(
+                        configured_options.github_file_max_bytes
+                    ),
+                    step=1,
+                    key=f"github-file-max:{source_key}",
+                )
         actions = st.columns(2) if is_github else [st]
         actions_disabled = snapshot.active
         submitted = actions[0].form_submit_button(
@@ -186,7 +226,7 @@ def render_application(
             clear_github_rate_limit(st.session_state)
             _fetch_rate_limit(st, fetch_rate_limit, runtime)
             _render_rate_limit_result(st)
-            return
+            return False
     if submitted:
         clear_github_rate_limit(st.session_state)
         _start_analysis(
@@ -200,6 +240,18 @@ def render_application(
             result_limit=int(result_limit),
             reading_limit=int(reading_limit),
             include_file_list=include_file_list,
+            github_archive_max_mb=(
+                int(github_archive_max_mb or 0) if is_github else None
+            ),
+            github_file_limit=(
+                int(github_file_limit or 0) if is_github else None
+            ),
+            github_content_max_mb=(
+                int(github_content_max_mb or 0) if is_github else None
+            ),
+            github_file_max_mb=(
+                int(github_file_max_mb or 0) if is_github else None
+            ),
             load_options=load_options,
             ensure_config=ensure_config,
         )
@@ -215,7 +267,23 @@ def render_application(
             runtime.request_cancel()
     if is_github:
         _render_rate_limit_result(st)
-    render_snapshot(runtime.snapshot(), st)
+    snapshot = runtime.snapshot()
+    if not snapshot.active:
+        render_snapshot(snapshot, st)
+    return snapshot.active
+
+
+def render_analysis_progress(
+    st: StreamlitApi,
+    analyze: AnalyzeRepository,
+) -> None:
+    """在轮询 fragment 中只渲染当前分析进度。"""
+    runtime = get_analysis_runtime(st.session_state, analyze)
+    snapshot = runtime.snapshot()
+    if snapshot.active:
+        render_snapshot(snapshot, st)
+    else:
+        st.rerun()
 
 
 def _default_options(
@@ -302,6 +370,10 @@ def _start_analysis(
     result_limit: int,
     reading_limit: int,
     include_file_list: bool,
+    github_archive_max_mb: int | None = None,
+    github_file_limit: int | None = None,
+    github_content_max_mb: int | None = None,
+    github_file_max_mb: int | None = None,
     load_options: LoadOptions,
     ensure_config: EnsureConfig,
 ) -> None:
@@ -336,6 +408,22 @@ def _start_analysis(
             result_limit=result_limit,
             reading_limit=reading_limit,
             include_file_list=include_file_list,
+            github_archive_max_bytes=(
+                github_archive_max_mb * 1024 * 1024
+                if github_archive_max_mb is not None
+                else None
+            ),
+            github_file_limit=github_file_limit,
+            github_content_max_bytes=(
+                github_content_max_mb * 1024 * 1024
+                if github_content_max_mb is not None
+                else None
+            ),
+            github_file_max_bytes=(
+                github_file_max_mb * 1024 * 1024
+                if github_file_max_mb is not None
+                else None
+            ),
         )
         runtime.start(
             source=source,

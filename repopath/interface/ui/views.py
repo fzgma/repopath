@@ -1,10 +1,13 @@
 """Streamlit 报告视图组件。"""
 
 import json
-from collections.abc import Sequence
-from typing import Any, TypeAlias
+from collections.abc import Callable, Iterable, Sequence
+from heapq import nsmallest
+from itertools import islice
+from typing import Any, TypeAlias, TypeVar
 
 from ...model.dependency import DependencyEdge
+from ...model.git import FileChangeStats
 from ...model.report import RepositoryReport
 from ...renderer.json import JsonRenderer
 from ...renderer.markdown import MarkdownRenderer
@@ -13,6 +16,7 @@ from .state import AnalysisSnapshot, UiRunState
 
 StreamlitApi: TypeAlias = Any
 Row: TypeAlias = dict[str, object]
+Item = TypeVar("Item")
 
 
 def render_snapshot(
@@ -36,13 +40,18 @@ def render_snapshot(
         with st.expander("查看详细错误"):
             st.code(error.details)
     elif snapshot.report is not None:
-        render_report(snapshot.report, st)
+        render_report(snapshot.report, st, cache_key=snapshot.job_id)
     else:
         st.info("输入本地目录或 GitHub 公开仓库地址后开始分析。")
 
 
-def render_report(report: RepositoryReport, st: StreamlitApi) -> None:
-    """将完整仓库报告渲染为七个结果页签。"""
+def render_report(
+    report: RepositoryReport,
+    st: StreamlitApi,
+    *,
+    cache_key: str | None = None,
+) -> None:
+    """只渲染用户当前选择的报告视图。"""
     graph = report.dependencies
     metrics = st.columns(6)
     values: list[tuple[str, object, str | None]] = [
@@ -66,23 +75,39 @@ def render_report(report: RepositoryReport, st: StreamlitApi) -> None:
     ):
         column.metric(label, value, help=help_text)
     _render_messages(report, st)
-    tabs = st.tabs(
-        ["概览", "推荐阅读", "依赖关系", "Python", "C++", "Git", "报告"]
+    _render_analysis_scope_hint(report, st)
+    view = st.segmented_control(
+        "报告视图",
+        [
+            "概览",
+            "推荐阅读",
+            "依赖关系",
+            "Python",
+            "C++",
+            "Git",
+            "报告",
+        ],
+        default="概览",
+        selection_mode="single",
+        key="report_view",
     )
-    with tabs[0]:
-        _render_overview(report, st)
-    with tabs[1]:
-        _render_reading(report, st)
-    with tabs[2]:
-        _render_dependencies(report, st)
-    with tabs[3]:
-        _render_python(report, st)
-    with tabs[4]:
-        _render_cpp(report, st)
-    with tabs[5]:
-        _render_git(report, st)
-    with tabs[6]:
-        _render_downloads(report, st)
+    match view:
+        case "概览":
+            _render_overview(report, st)
+        case "推荐阅读":
+            _render_reading(report, st)
+        case "依赖关系":
+            _render_dependencies(report, st)
+        case "Python":
+            _render_python(report, st)
+        case "C++":
+            _render_cpp(report, st)
+        case "Git":
+            _render_git(report, st)
+        case "报告":
+            _render_downloads(report, st, cache_key=cache_key)
+        case _:
+            _render_overview(report, st)
 
 
 def _render_messages(
@@ -100,6 +125,27 @@ def _render_messages(
                 st.write(f"- {message}")
         for message in report.warnings:
             st.info(message)
+
+
+def _render_analysis_scope_hint(
+    report: RepositoryReport, st: StreamlitApi
+) -> None:
+    """说明当前分析模式未启用的结果类型及切换建议。"""
+    options = report.options
+    hints: list[str] = []
+    if not options.dependencies_enabled:
+        hints.append(
+            "依赖分析未启用，依赖关系、推荐阅读和结构热点不会生成。"
+        )
+    if not options.git_enabled:
+        hints.append("Git 分析未启用，Git 变更热点不会生成。")
+    if not hints:
+        return
+    with st.expander("分析范围提示", expanded=True):
+        for hint in hints:
+            st.warning(hint)
+        if options.profile != "deep":
+            st.info("切换到“深度”模式后重新分析，可生成完整导航结果。")
 
 
 def _render_overview(
@@ -208,7 +254,13 @@ def _render_overview(
         )
         st.dataframe(rows, width="stretch", hide_index=True)
     else:
-        st.info("当前没有同时具有依赖中心度和 Git 修改热度的文件。")
+        if (
+            not report.options.dependencies_enabled
+            or not report.options.git_enabled
+        ):
+            st.info("结构热点需要同时启用依赖分析和 Git 分析。")
+        else:
+            st.info("当前没有同时具有依赖中心度和 Git 修改热度的文件。")
     with st.expander("Analyzer 耗时"):
         durations: list[Row] = [
             {"Analyzer": name, "秒": duration}
@@ -263,12 +315,20 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
         and (not keyword or keyword.lower() in item.path.lower())
     ]
     if sort_by == "核心评分":
-        items = sorted(items, key=lambda item: (-item.score, item.path))
+        visible = _limited_sorted(
+            items,
+            reading_limit,
+            key=lambda item: (-item.score, item.path),
+        )
+    else:
+        visible = items[:reading_limit]
     _caption_count(st, len(items), len(all_items), reading_limit)
     if not items:
-        st.info("当前配置未生成推荐阅读顺序。")
+        if not report.options.insights_enabled:
+            st.info("推荐阅读未启用；切换到“深度”模式后重新分析。")
+        else:
+            st.info("当前没有符合筛选条件的推荐阅读模块。")
         return
-    visible = items[:reading_limit]
     rows: list[Row] = [
         {
             "排名": item.rank,
@@ -302,6 +362,11 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
             "每远离入口一层减 4 分；Git 分最高 25 分。"
         ),
     )
+    score_items = _limited_sorted(
+        report.insights.module_scores,
+        reading_limit,
+        key=lambda item: (-item.total_score, item.path),
+    )
     scores: list[Row] = [
         {
             "路径": item.path,
@@ -312,10 +377,7 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
             "Git": item.git_score,
             "总分": item.total_score,
         }
-        for item in sorted(
-            report.insights.module_scores,
-            key=lambda score: (-score.total_score, score.path),
-        )[:reading_limit]
+        for item in score_items
     ]
     st.dataframe(scores, width="stretch", hide_index=True)
     if report.insights.reading_paths:
@@ -404,7 +466,10 @@ def _render_dependencies(
     """展示统一依赖边、目录聚合、循环和孤立模块。"""
     graph = report.dependencies
     if not graph.nodes:
-        st.info("当前配置未生成统一依赖图。")
+        if not report.options.dependencies_enabled:
+            st.info("依赖分析未启用；切换到“深度”模式后重新分析。")
+        else:
+            st.info("当前没有可展示的依赖节点。")
         return
     filters = st.columns(4)
     with filters[0]:
@@ -448,30 +513,45 @@ def _render_dependencies(
         )
         and (not keyword or keyword.lower() in node.path.lower())
     }
-    edges = [
-        edge
-        for edge in graph.edges
-        if edge.source in nodes and edge.target in nodes
-    ]
-    edges.sort(
-        key=lambda edge: (
-            (
+
+    def edge_matches(edge: DependencyEdge) -> bool:
+        """判断依赖边的两端是否都通过当前筛选条件。"""
+        return edge.source in nodes and edge.target in nodes
+
+    if sort_by == "目标路径":
+
+        def edge_key(edge: DependencyEdge) -> tuple[str, str]:
+            """按依赖目标和来源路径排序。"""
+            return (
                 graph.nodes[edge.target].path,
                 graph.nodes[edge.source].path,
             )
-            if sort_by == "目标路径"
-            else (
+    else:
+
+        def edge_key(edge: DependencyEdge) -> tuple[str, str]:
+            """按依赖来源和目标路径排序。"""
+            return (
                 graph.nodes[edge.source].path,
                 graph.nodes[edge.target].path,
             )
-        )
+
+    total_edges = sum(edge_matches(edge) for edge in graph.edges)
+    graph_edges = (
+        [edge for edge in graph.edges if edge_matches(edge)]
+        if total_edges <= 50 and len(nodes) <= 30
+        else []
+    )
+    edges = _limited_sorted(
+        (edge for edge in graph.edges if edge_matches(edge)),
+        report.options.result_limit,
+        key=edge_key,
     )
     _caption_count(
-        st, len(edges), len(graph.edges), report.options.result_limit
+        st, total_edges, len(graph.edges), report.options.result_limit
     )
-    if len(nodes) <= 30 and len(edges) <= 50 and edges:
+    if len(nodes) <= 30 and graph_edges:
         st.graphviz_chart(
-            _dependency_dot(report, nodes, edges), width="stretch"
+            _dependency_dot(report, nodes, graph_edges), width="stretch"
         )
     rows: list[Row] = [
         {
@@ -479,7 +559,7 @@ def _render_dependencies(
             "目标": graph.nodes[edge.target].path,
             "类型": edge.kind,
         }
-        for edge in edges[: report.options.result_limit]
+        for edge in edges
     ]
     if rows:
         st.dataframe(rows, width="stretch", hide_index=True)
@@ -567,9 +647,12 @@ def _render_python(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示 Python import、依赖和符号。"""
     python = report.python
     if not python.module_paths:
-        st.info(
-            "当前仓库没有可分析的 Python 文件，或该 Analyzer 已关闭。"
-        )
+        if not report.options.python_enabled:
+            st.info(
+                "Python 分析未启用；切换到“标准”或“深度”模式后重新分析。"
+            )
+        else:
+            st.info("当前仓库没有可分析的 Python 文件。")
         return
     metrics = st.columns(4)
     metrics[0].metric("模块", len(python.module_paths))
@@ -585,18 +668,23 @@ def _render_python(report: RepositoryReport, st: StreamlitApi) -> None:
     ]
     st.dataframe(rows, width="stretch", hide_index=True)
     with st.expander("Python 符号"):
-        symbols: list[Row] = [
-            {
-                "文件": report.repository.relative_path(path),
-                "名称": symbol.name,
-                "类型": symbol.kind,
-                "行号": symbol.line,
-            }
-            for path, items in python.symbols_by_file.items()
-            for symbol in items
-        ]
+        symbols: list[Row] = list(
+            islice(
+                (
+                    {
+                        "文件": report.repository.relative_path(path),
+                        "名称": symbol.name,
+                        "类型": symbol.kind,
+                        "行号": symbol.line,
+                    }
+                    for path, items in python.symbols_by_file.items()
+                    for symbol in items
+                ),
+                report.options.result_limit,
+            )
+        )
         st.dataframe(
-            symbols[: report.options.result_limit],
+            symbols,
             width="stretch",
             hide_index=True,
         )
@@ -606,7 +694,12 @@ def _render_cpp(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示 C++ include、符号和入口。"""
     cpp = report.cpp
     if not cpp.files:
-        st.info("当前仓库没有可分析的 C++ 文件，或该 Analyzer 已关闭。")
+        if not report.options.cpp_enabled:
+            st.info(
+                "C++ 分析未启用；切换到“标准”或“深度”模式后重新分析。"
+            )
+        else:
+            st.info("当前仓库没有可分析的 C++ 文件。")
         return
     metrics = st.columns(4)
     metrics[0].metric("文件", len(cpp.files))
@@ -622,22 +715,27 @@ def _render_cpp(report: RepositoryReport, st: StreamlitApi) -> None:
     ]
     st.dataframe(rows, width="stretch", hide_index=True)
     with st.expander("C++ 符号"):
-        symbols: list[Row] = [
-            {
-                "文件": report.repository.relative_path(path),
-                "名称": symbol.name,
-                "类型": symbol.kind,
-                "行号": symbol.line,
-            }
-            for path, item in cpp.files.items()
-            for symbol in [
-                *item.functions,
-                *item.types,
-                *item.namespaces,
-            ]
-        ]
+        symbols: list[Row] = list(
+            islice(
+                (
+                    {
+                        "文件": report.repository.relative_path(path),
+                        "名称": symbol.name,
+                        "类型": symbol.kind,
+                        "行号": symbol.line,
+                    }
+                    for path, item in cpp.files.items()
+                    for symbol in [
+                        *item.functions,
+                        *item.types,
+                        *item.namespaces,
+                    ]
+                ),
+                report.options.result_limit,
+            )
+        )
         st.dataframe(
-            symbols[: report.options.result_limit],
+            symbols,
             width="stretch",
             hide_index=True,
         )
@@ -647,10 +745,12 @@ def _render_git(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示 Git 趋势、热点、贡献者和最近提交。"""
     git = report.git
     if not git.available:
-        st.info(
-            git.error
-            or "当前目录没有可用的 Git 历史，或 Git Analyzer 已关闭。"
-        )
+        if not report.options.git_enabled:
+            st.info(
+                "Git 分析未启用；切换到“标准”或“深度”模式后重新分析。"
+            )
+        else:
+            st.info(git.error or "当前目录没有可用的 Git 历史。")
         return
     metrics = st.columns(4)
     metrics[0].metric("提交", git.commit_count)
@@ -692,22 +792,36 @@ def _render_git(report: RepositoryReport, st: StreamlitApi) -> None:
         sort_by = st.selectbox(
             "热点排序", ["Churn", "路径"], key="git_sort"
         )
-    hottest = [
-        (path, change)
-        for path, change in git.file_changes.items()
-        if (directory == "全部" or _top_directory(path) == directory)
-        and (not keyword or keyword.lower() in path.lower())
+
+    def change_matches(item: tuple[str, FileChangeStats]) -> bool:
+        """判断 Git 文件变更是否通过当前筛选条件。"""
+        path = item[0]
+        return (
+            directory == "全部" or _top_directory(path) == directory
+        ) and (not keyword or keyword.lower() in path.lower())
+
+    hottest_key: Callable[
+        [tuple[str, FileChangeStats]], tuple[object, ...]
     ]
-    hottest.sort(
-        key=lambda item: (
-            (item[0],)
-            if sort_by == "路径"
-            else (-item[1].churn, item[0])
-        )
+    if sort_by == "路径":
+        hottest_key = _git_path_key
+    else:
+        hottest_key = _git_churn_key
+    total_hottest = sum(
+        change_matches(item) for item in git.file_changes.items()
+    )
+    hottest = _limited_sorted(
+        (
+            item
+            for item in git.file_changes.items()
+            if change_matches(item)
+        ),
+        report.options.result_limit,
+        key=hottest_key,
     )
     _caption_count(
         st,
-        len(hottest),
+        total_hottest,
         len(git.file_changes),
         report.options.result_limit,
     )
@@ -722,7 +836,7 @@ def _render_git(report: RepositoryReport, st: StreamlitApi) -> None:
             "文件修改": change.modified,
             "Churn": change.churn,
         }
-        for path, change in hottest[: report.options.result_limit]
+        for path, change in hottest
     ]
     if rows:
         st.bar_chart(
@@ -779,11 +893,18 @@ def _render_git(report: RepositoryReport, st: StreamlitApi) -> None:
 
 
 def _render_downloads(
-    report: RepositoryReport, st: StreamlitApi
+    report: RepositoryReport,
+    st: StreamlitApi,
+    *,
+    cache_key: str | None = None,
 ) -> None:
     """展示报告预览并提供完整 Markdown 和 JSON 下载。"""
-    markdown = MarkdownRenderer().render(report)
-    json_text = JsonRenderer().render(report)
+    markdown = _cached_report_text(
+        report, st, "markdown", MarkdownRenderer().render, cache_key
+    )
+    json_text = _cached_report_text(
+        report, st, "json", JsonRenderer().render, cache_key
+    )
     left, right = st.columns(2)
     with left:
         st.download_button(
@@ -801,9 +922,45 @@ def _render_downloads(
             mime="application/json",
             width="stretch",
         )
-    st.code(markdown, language="markdown")
-    with st.expander("原始 JSON"):
-        st.json(json_text)
+    show_markdown = st.checkbox(
+        "显示 Markdown 预览", value=False, key="show_markdown_preview"
+    )
+    if show_markdown:
+        st.code(markdown, language="markdown")
+    show_json = st.checkbox(
+        "显示原始 JSON", value=False, key="show_json_preview"
+    )
+    if show_json:
+        st.code(json_text, language="json")
+
+
+def _cached_report_text(
+    report: RepositoryReport,
+    st: StreamlitApi,
+    format_name: str,
+    render: Callable[[RepositoryReport], str],
+    cache_key: str | None,
+) -> str:
+    """按任务编号缓存完整报告文本，避免 fragment 重复序列化。"""
+    if cache_key is None:
+        return render(report)
+    session_state = getattr(st, "session_state", None)
+    if session_state is None:
+        return render(report)
+    key = f"_repopath_report_{cache_key}_{format_name}"
+    cached = session_state.get(key)
+    if isinstance(cached, str):
+        return cached
+    value = render(report)
+    for old_key in list(session_state):
+        if (
+            isinstance(old_key, str)
+            and old_key.startswith("_repopath_report_")
+            and old_key != key
+        ):
+            session_state.pop(old_key, None)
+    session_state[key] = value
+    return value
 
 
 def _caption_count(
@@ -813,3 +970,30 @@ def _caption_count(
     st.caption(
         f"当前 {current} / 总计 {total}，页面最多展示 {min(current, limit)} 条。"
     )
+
+
+def _limited_sorted(
+    items: Iterable[Item],
+    limit: int,
+    *,
+    key: Callable[[Item], Any],
+) -> list[Item]:
+    """只排序并返回页面需要的前若干项。"""
+    if isinstance(items, Sequence):
+        if len(items) <= limit:
+            return sorted(items, key=key)
+    return nsmallest(limit, items, key=key)
+
+
+def _git_path_key(
+    item: tuple[str, FileChangeStats],
+) -> tuple[str, ...]:
+    """返回 Git 文件变更的路径排序键。"""
+    return (item[0],)
+
+
+def _git_churn_key(
+    item: tuple[str, FileChangeStats],
+) -> tuple[int, str]:
+    """返回 Git 文件变更的 Churn 排序键。"""
+    return (-item[1].churn, item[0])

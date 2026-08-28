@@ -151,6 +151,8 @@ python -m repopath . --format json -o REPOPATH_REPORT.json
 
 `-o` 用于指定输出路径；未指定时默认生成 `REPOPATH_REPORT.md`。输出文件会自动从本次扫描中排除。
 
+Markdown 默认生成适合快速阅读的摘要，包含项目概览、入口、推荐阅读、结构热点和循环依赖。需要完整分析结果时使用 `--detail full`，也可以使用等价的 `--verbose`；JSON 始终输出完整结构：
+
 常用分析参数：
 
 ```powershell
@@ -158,7 +160,14 @@ python -m repopath . --profile deep --git-period 90 --result-limit 30
 python -m repopath . --exclude "generated/*" --max-file-size 2097152
 python -m repopath . --reading-limit 10 --include-file-list
 python -m repopath . --no-cpp --no-git
+python -m repopath owner/repository --github-limits archive_mb=200 --github-limits files=20000 --github-limits content_mb=200 --github-limits file_mb=20
 ```
+
+常用长参数支持短别名：`-f/--format`、`-d/--detail`、
+`-v/--verbose`、`-c/--config`、`-p/--profile`、`-e/--exclude`、
+`-m/--max-file-size`、`-g/--git-period`、`-n/--result-limit`、
+`-l/--reading-limit`、`-i/--include-file-list`；输出路径仍使用
+`-o/--output`。
 
 分析公开 GitHub 仓库：
 
@@ -203,6 +212,12 @@ exclude = ["generated/*", "*.min.js"]
 [git]
 period = "all"
 
+[github]
+archive_max_mb = 100
+file_limit = 10000
+content_max_mb = 100
+file_max_mb = 10
+
 [report]
 limit = 50
 reading_limit = 10
@@ -235,6 +250,8 @@ python run_streamlit.py
 
 页面会先读取目标目录 `.repopath.toml` 的模式和高级配置，再应用用户在页面中选择的模式与高级参数。UI 覆盖顺序为：内置默认值 < `.repopath.toml` < 已选择模式 < UI 高级配置。高级配置可设置 Git 历史时间范围、单文件读取上限、通用页面结果数量、阅读与评分数量，以及 Markdown 文件清单开关；页面截断只影响视图，Markdown 和 JSON 下载始终保留完整 `RepositoryReport`。
 
+如果配置文件使用 `fast` 模式，报告只包含文件和统计结果，依赖图、推荐阅读、结构热点及 Git 热点不会生成。需要完整导航时可在命令行使用 `--profile deep`，或修改配置文件
+
 ## 四、使用方式
 
 ### 命令行
@@ -246,7 +263,7 @@ python run_streamlit.py
 例如：
 
 ```powershell
-python -m repopath D:\code\sample-project -o D:\reports\sample-project.md
+python -m repopath D:/path/to/repo -o D:\reports\sample-project.md
 ```
 
 ### Streamlit UI
@@ -255,7 +272,7 @@ python -m repopath D:\code\sample-project -o D:\reports\sample-project.md
 2. 选择本地目录或 GitHub 公开仓库，再输入对应路径或仓库地址；GitHub 模式可选填分支、标签或提交 SHA。
 3. 选择快速、标准或深度模式；需要时在“高级配置”调整 Git 时间范围、最大文件大小、页面结果数量、阅读与评分数量，以及 Markdown 文件清单开关。
 4. 点击“分析仓库”，分析会在后台线程执行，页面按 Pipeline 阶段自动刷新进度；可点击“停止分析”发出协作式取消请求。
-5. 在概览、推荐阅读、依赖关系、Python、C++、Git 和报告页签中查看结果；可按语言、目录和路径筛选并排序阅读路线、依赖边和 Git 热点。
+5. 在报告视图选择器中查看概览、推荐阅读、依赖关系、Python、C++、Git 或报告；可按语言、目录和路径筛选并排序阅读路线、依赖边和 Git 热点。
 6. 在推荐阅读页选择模块，可联动查看核心评分、推荐原因、正向依赖和反向依赖；在报告页下载完整 Markdown 或 JSON。
 
 页面会在关键概念处提供帮助说明：核心评分综合规模、依赖、入口可达性和 Git 修改热度；风险热点结合依赖重要性与修改热度；Churn 是历史新增和删除行数总和；循环依赖表示模块间的闭环关系。小型依赖图显示为 Graphviz；大型依赖图切换为目录聚合和可筛选的边表。
@@ -296,7 +313,7 @@ python -m pyright
 ## 七、当前限制
 
 1. GitHub 仅支持公开仓库；可选 `GITHUB_TOKEN` 只用于提高公开 API 额度，不支持私有仓库、GitHub Enterprise 或缓存。网络超时和不完整读取会最多重试 3 次。
-2. GitHub 快照最多下载 100 MB 压缩归档，解压后最多读取 10,000 个文件、100 MB 总内容和 10 MB 单文件；不符合限制或包含不安全路径的归档会被拒绝。
+2. GitHub 快照默认最多下载 100 MB 压缩归档，解压后最多读取 10,000 个文件、100 MB 总内容和 10 MB 单文件；这些限制可在配置文件 `[github]`、CLI 的 `--github-limits` 或 UI 高级配置中调整。不符合当前限制或包含不安全路径的归档会被拒绝。
 3. 远程快照不包含本地 `.git`，因此 Git 提交趋势、Churn、共同修改和风险热点中的 Git 分不会生成。
 4. C++ 使用正则进行基础静态识别，不替代完整 C++ AST、编译数据库或类型分析。
 5. Python 仅解析语法和 import，不执行目标仓库代码。

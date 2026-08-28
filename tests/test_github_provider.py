@@ -11,6 +11,7 @@ import pytest
 
 from repopath.core.service import analyze_repository
 from repopath.model.options import AnalysisOptions
+from repopath.model.options import GitHubSnapshotLimits
 from repopath.model.repository import RepositorySource
 from repopath.provider.github import (
     GitHubApiClient,
@@ -252,6 +253,20 @@ def test_github_snapshot_rejects_unsafe_archive_path() -> None:
     with pytest.raises(GitHubApiError, match="不安全"):
         with GitHubSnapshot(
             RepositorySource.github("github.com/example/demo"), client
+        ):
+            pass
+
+
+def test_github_snapshot_uses_configurable_archive_limits() -> None:
+    """验证 GitHub 快照使用调用方提供的归档大小上限。"""
+    client, _ = _client({"src/main.py": b"x" * 32})
+    limits = GitHubSnapshotLimits(archive_max_bytes=1)
+
+    with pytest.raises(GitHubApiError, match="归档超过下载大小限制"):
+        with GitHubSnapshot(
+            RepositorySource.github("github.com/example/demo"),
+            client,
+            limits=limits,
         ):
             pass
 

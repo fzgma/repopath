@@ -27,6 +27,12 @@ exclude = []
 [git]
 period = "all"
 
+[github]
+archive_max_mb = 100
+file_limit = 10000
+content_max_mb = 100
+file_max_mb = 10
+
 [report]
 limit = 50
 reading_limit = 10
@@ -82,6 +88,7 @@ def load_analysis_options(
     scan = _section(payload, "scan")
     analyzers = _section(payload, "analyzers")
     git = _section(payload, "git")
+    github = _section(payload, "github")
     report = _section(payload, "report")
     profile = str(scan.get("profile", "deep"))
     python_enabled = _optional_bool(analyzers, "python")
@@ -114,6 +121,16 @@ def load_analysis_options(
             dependencies_enabled=dependencies_enabled,
             insights_enabled=insights_enabled,
             git_period=str(git["period"]) if "period" in git else None,
+            github_archive_max_bytes=_megabytes_to_bytes(
+                github, "archive_max_mb"
+            ),
+            github_file_limit=_optional_int(github, "file_limit"),
+            github_content_max_bytes=_megabytes_to_bytes(
+                github, "content_max_mb"
+            ),
+            github_file_max_bytes=_megabytes_to_bytes(
+                github, "file_max_mb"
+            ),
             result_limit=_optional_int(report, "limit"),
             reading_limit=_optional_int(report, "reading_limit"),
             include_file_list=_optional_bool(
@@ -155,6 +172,14 @@ def _optional_int(section: dict[str, object], key: str) -> int | None:
     if not isinstance(value, int) or isinstance(value, bool):
         raise TypeError(f"{key} 必须是整数")
     return value
+
+
+def _megabytes_to_bytes(
+    section: dict[str, object], key: str
+) -> int | None:
+    """读取 MB 配置并转换为字节数。"""
+    megabytes = _optional_int(section, key)
+    return megabytes * 1024 * 1024 if megabytes is not None else None
 
 
 def _optional_strings(

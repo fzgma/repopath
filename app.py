@@ -11,7 +11,10 @@ from repopath.core.service import (
     analyze_repository,
     fetch_github_rate_limit,
 )
-from repopath.interface.ui import render_application
+from repopath.interface.ui import (
+    render_analysis_progress,
+    render_application,
+)
 
 
 def main() -> None:
@@ -25,18 +28,21 @@ def main() -> None:
         ) from exc
     st.set_page_config(page_title="RepoPath", layout="wide")
 
-    @st.fragment(run_every=0.5)
-    def render_workspace() -> None:
-        """在 UI 主线程中定时轮询并渲染分析工作区。"""
-        render_application(
-            st,
-            analyze_repository,
-            load_analysis_options,
-            ensure_default_config,
-            fetch_github_rate_limit,
-        )
+    active = render_application(
+        st,
+        analyze_repository,
+        load_analysis_options,
+        ensure_default_config,
+        fetch_github_rate_limit,
+    )
+    if active:
 
-    render_workspace()
+        @st.fragment(run_every=0.5)
+        def render_progress() -> None:
+            """定时刷新后台分析进度并在完成后刷新页面。"""
+            render_analysis_progress(st, analyze_repository)
+
+        render_progress()
 
 
 if __name__ == "__main__":

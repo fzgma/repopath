@@ -8,6 +8,27 @@ VALID_GIT_PERIODS = {"all", "30", "90"}
 
 
 @dataclass(frozen=True)
+class GitHubSnapshotLimits:
+    """保存 GitHub 快照下载和解压的资源上限。"""
+
+    archive_max_bytes: int = 100 * 1024 * 1024
+    file_limit: int = 10_000
+    content_max_bytes: int = 100 * 1024 * 1024
+    file_max_bytes: int = 10 * 1024 * 1024
+
+    def validate(self) -> None:
+        """校验 GitHub 快照资源上限均为正数。"""
+        for value in (
+            self.archive_max_bytes,
+            self.file_limit,
+            self.content_max_bytes,
+            self.file_max_bytes,
+        ):
+            if value <= 0:
+                raise ValueError("GitHub 快照资源上限必须大于 0")
+
+
+@dataclass(frozen=True)
 class AnalysisOptions:
     """保存 CLI、配置文件和 UI 共用的分析选项。"""
 
@@ -24,6 +45,10 @@ class AnalysisOptions:
     include_file_list: bool = False
     git_period: str = "all"
     excluded_patterns: tuple[str, ...] = ()
+    github_archive_max_bytes: int = 100 * 1024 * 1024
+    github_file_limit: int = 10_000
+    github_content_max_bytes: int = 100 * 1024 * 1024
+    github_file_max_bytes: int = 10 * 1024 * 1024
 
     @classmethod
     def for_profile(cls, profile: str) -> "AnalysisOptions":
@@ -78,6 +103,17 @@ class AnalysisOptions:
             )
         if self.insights_enabled and not self.dependencies_enabled:
             raise ValueError("阅读洞察需要启用依赖分析")
+        self.github_snapshot_limits.validate()
+
+    @property
+    def github_snapshot_limits(self) -> GitHubSnapshotLimits:
+        """返回当前配置对应的 GitHub 快照资源上限。"""
+        return GitHubSnapshotLimits(
+            archive_max_bytes=self.github_archive_max_bytes,
+            file_limit=self.github_file_limit,
+            content_max_bytes=self.github_content_max_bytes,
+            file_max_bytes=self.github_file_max_bytes,
+        )
 
     def analyzer_enabled(self, name: str) -> bool:
         """判断指定 Analyzer 是否应在当前配置下运行。"""

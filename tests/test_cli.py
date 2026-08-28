@@ -78,8 +78,8 @@ def test_cli_writes_markdown_and_passes_options_to_service(
     assert exit_code == 0
     assert output.exists()
     markdown = output.read_text(encoding="utf-8")
-    assert markdown.startswith("# RepoPath 报告")
-    assert f"# RepoPath 报告：`{tmp_path.name}`" in markdown
+    assert markdown.startswith("# RepoPath 摘要")
+    assert f"# RepoPath 摘要：`{tmp_path.name}`" in markdown
     assert "报告已写入" in capsys.readouterr().out
     assert len(calls) == 1
     root, excluded_paths, options = calls[0]
@@ -92,6 +92,148 @@ def test_cli_writes_markdown_and_passes_options_to_service(
     assert options.max_file_size == 4096
     assert options.result_limit == 12
     assert options.excluded_patterns == ("build/*",)
+
+
+def test_cli_defaults_to_summary_and_supports_full_detail(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证 CLI 默认摘要并支持显式完整 Markdown。"""
+    calls: list[
+        tuple[str | Path | RepositorySource, set[Path], AnalysisOptions]
+    ] = []
+    _install_fake_analysis(monkeypatch, calls)
+    monkeypatch.chdir(tmp_path)
+
+    assert cli.main(["."]) == 0
+    summary = (tmp_path / "REPOPATH_REPORT.md").read_text(
+        encoding="utf-8"
+    )
+    assert summary.startswith("# RepoPath 摘要")
+    assert "## 语言统计" not in summary
+
+    assert (
+        cli.main([".", "--detail", "full", "-o", "full-report.md"]) == 0
+    )
+    full = (tmp_path / "full-report.md").read_text(encoding="utf-8")
+    assert full.startswith("# RepoPath 报告")
+    assert "## 语言统计" in full
+
+    args = cli.build_parser().parse_args([".", "--verbose"])
+    assert args.detail == "full"
+
+
+def test_cli_summary_reports_configured_analysis_mode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """验证摘要会说明 fast 配置导致的分析范围。"""
+    calls: list[
+        tuple[str | Path | RepositorySource, set[Path], AnalysisOptions]
+    ] = []
+    _install_fake_analysis(monkeypatch, calls)
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".repopath.toml").write_text(
+        '[scan]\nprofile = "fast"\n',
+        encoding="utf-8",
+    )
+
+    assert cli.main(["."]) == 0
+
+    summary = (tmp_path / "REPOPATH_REPORT.md").read_text(
+        encoding="utf-8"
+    )
+    assert "- 分析模式：fast" in summary
+    assert "- 已启用 Analyzer：files, statistics" in summary
+    assert "## 分析范围提示" in summary
+    assert "python -m repopath . --profile deep" in summary
+
+
+def test_cli_parses_grouped_github_snapshot_limits(
+    tmp_path: Path,
+) -> None:
+    """验证 CLI 将 GitHub 限制参数合并到分析配置。"""
+    args = cli.build_parser().parse_args(
+        [
+            ".",
+            "--github-limits",
+            "archive_mb=20",
+            "--github-limits",
+            "files=2000",
+            "--github-limits",
+            "content_mb=30",
+            "--github-limits",
+            "file_mb=4",
+        ]
+    )
+
+    options = cli._resolve_options(
+        tmp_path,
+        args,
+        github_limits=cli._parse_github_limits(args.github_limits),
+    )
+
+    assert options.github_archive_max_bytes == 20 * 1024 * 1024
+    assert options.github_file_limit == 2000
+    assert options.github_content_max_bytes == 30 * 1024 * 1024
+    assert options.github_file_max_bytes == 4 * 1024 * 1024
+
+
+def test_cli_short_options_match_long_option_values() -> None:
+    """验证常用 CLI 参数的短选项与长选项等价。"""
+    parser = cli.build_parser()
+
+    short = parser.parse_args(
+        [
+            "repo",
+            "-f",
+            "json",
+            "-d",
+            "full",
+            "-c",
+            "custom.toml",
+            "-p",
+            "deep",
+            "-e",
+            "build/*",
+            "-m",
+            "4096",
+            "-g",
+            "30",
+            "-n",
+            "20",
+            "-l",
+            "8",
+            "-i",
+        ]
+    )
+    long = parser.parse_args(
+        [
+            "repo",
+            "--format",
+            "json",
+            "--detail",
+            "full",
+            "--config",
+            "custom.toml",
+            "--profile",
+            "deep",
+            "--exclude",
+            "build/*",
+            "--max-file-size",
+            "4096",
+            "--git-period",
+            "30",
+            "--result-limit",
+            "20",
+            "--reading-limit",
+            "8",
+            "--include-file-list",
+        ]
+    )
+
+    assert vars(short) == vars(long)
+    assert parser.parse_args(["repo", "-v"]).detail == "full"
 
 
 def test_cli_uses_json_default_output_when_format_is_json(

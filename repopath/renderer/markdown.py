@@ -27,8 +27,14 @@ def _markdown_cycle_member(node: str) -> str:
 class MarkdownRenderer:
     """将 RepositoryReport 渲染为可阅读的 Markdown 文档。"""
 
-    def render(self, report: RepositoryReport) -> str:
+    def render(
+        self, report: RepositoryReport, *, detail: str = "full"
+    ) -> str:
         """生成包含概览、分析结果、Git 历史和文件清单的 Markdown。"""
+        if detail == "summary":
+            return self._render_summary(report)
+        if detail != "full":
+            raise ValueError("Markdown 详情级别必须是 summary 或 full")
         repository = report.repository
         stats = report.stats
         python = report.python
@@ -81,6 +87,7 @@ class MarkdownRenderer:
                 f"- 错误：{markdown_cell(message)}"
                 for message in report.errors
             )
+        self._append_analysis_hint(lines, report)
 
         lines.extend(
             [
@@ -591,6 +598,188 @@ class MarkdownRenderer:
                     )
                 )
         return "\n".join(lines) + "\n"
+
+    def _render_summary(self, report: RepositoryReport) -> str:
+        """生成适合人工快速阅读的精简 Markdown 摘要。"""
+        repository = report.repository
+        stats = report.stats
+        graph = report.dependencies
+        insights = report.insights
+        lines = [
+            f"# RepoPath 摘要：`{markdown_cell(repository.name)}`",
+            "",
+            f"> 生成时间：{report.generated_at or self._timestamp()} · "
+            f"RepoPath {report.tool_version}",
+            "",
+            "## 概览",
+            "",
+            f"- 文件数：{len(report.files)}",
+            f"- 非空行数：{stats.total_non_empty_lines}",
+            f"- 识别语言：{len(stats.language_counts)}",
+            f"- 分析模式：{report.options.profile}",
+            f"- 已启用 Analyzer：{self._enabled_analyzers(report)}",
+            f"- Python 入口候选：{len(report.python.entry_points)}",
+            f"- C++ 入口候选：{len(report.cpp.entry_points)}",
+            f"- 依赖节点：{len(graph.nodes)}",
+            f"- 依赖边：{len(graph.edges)}",
+            f"- 分析耗时：{report.elapsed_seconds:.3f} 秒",
+        ]
+        if report.source is not None:
+            lines.append(
+                f"- 仓库来源：{markdown_cell(report.source.location)}"
+            )
+            if report.source.reference:
+                reference = markdown_cell(report.source.reference)
+                lines.append(f"- 固定提交：`{reference}`")
+        self._append_summary_messages(lines, report)
+        self._append_analysis_hint(lines, report)
+
+        lines.extend(["", "## Python 核心模块", ""])
+        if report.python.core_modules:
+            lines.extend(
+                f"- `{markdown_cell(module.name)}`："
+                f"{module.lines} 行，引用 {module.references} 次，"
+                f"评分 {module.score}"
+                for module in report.python.core_modules[:10]
+            )
+        else:
+            lines.append("暂无 Python 核心模块候选。")
+
+        lines.extend(["", "## 入口候选", ""])
+        entries = [
+            (
+                repository.relative_path(entry.path),
+                entry.reason,
+            )
+            for entry in report.python.entry_points[:10]
+        ]
+        entries.extend(
+            (
+                repository.relative_path(entry.path),
+                "C++ main",
+            )
+            for entry in report.cpp.entry_points[:10]
+        )
+        if entries:
+            for path, reason in entries[:10]:
+                lines.append(
+                    f"- `{markdown_cell(path)}`："
+                    f"{markdown_cell(reason)}"
+                )
+        else:
+            lines.append("未识别到入口候选。")
+
+        lines.extend(["", "## 推荐阅读", ""])
+        if insights.reading_order:
+            for item in insights.reading_order[:10]:
+                lines.append(
+                    f"{item.rank}. `{markdown_cell(item.path)}`："
+                    f"{markdown_cell('；'.join(item.reasons))}"
+                )
+        else:
+            lines.append("当前配置未生成推荐阅读顺序。")
+
+        if insights.reading_paths:
+            lines.extend(["", "### 入口到推荐模块的路径", ""])
+            for item in insights.reading_paths[:10]:
+                lines.append(
+                    f"- `{markdown_cell(item.entry)}` -> "
+                    f"`{markdown_cell(item.target)}`："
+                    f"`{markdown_cell(' -> '.join(item.nodes))}`"
+                )
+
+        lines.extend(["", "## 结构热点", ""])
+        if insights.hotspots:
+            for item in insights.hotspots[:10]:
+                lines.append(
+                    f"- `{markdown_cell(item.path)}`："
+                    f"依赖分 {item.dependency_score:.2f}，"
+                    f"Git 修改 {item.git_changes} 次，"
+                    f"关注分 {item.risk_score:.2f}"
+                )
+        else:
+            lines.append("未检测到结构热点。")
+
+        lines.extend(["", "## 循环依赖", ""])
+        if graph.cycles:
+            for index, cycle in enumerate(graph.cycles[:10], start=1):
+                members = "、".join(
+                    f"`{markdown_cell(node)}`" for node in cycle[:10]
+                )
+                lines.append(f"- 循环组 {index}：{members}")
+        else:
+            lines.append("未检测到循环依赖。")
+
+        if report.git.available:
+            lines.extend(["", "## Git 变更热点", ""])
+            hottest = sorted(
+                report.git.file_changes.items(),
+                key=lambda item: (-item[1].churn, item[0]),
+            )
+            for path, change in hottest[:10]:
+                lines.append(
+                    f"- `{markdown_cell(path)}`："
+                    f"Churn {change.churn}，提交 {change.commits} 次"
+                )
+        return "\n".join(lines) + "\n"
+
+    @staticmethod
+    def _append_summary_messages(
+        lines: list[str], report: RepositoryReport
+    ) -> None:
+        """将摘要所需的警告和错误追加到报告内容。"""
+        if not report.warnings and not report.errors:
+            return
+        lines.extend(["", "## 分析提示", ""])
+        lines.extend(
+            f"- 警告：{markdown_cell(message)}"
+            for message in report.warnings[:10]
+        )
+        lines.extend(
+            f"- 错误：{markdown_cell(message)}"
+            for message in report.errors[:10]
+        )
+
+    @staticmethod
+    def _append_analysis_hint(
+        lines: list[str], report: RepositoryReport
+    ) -> None:
+        """说明未启用分析项的影响和命令行处理方式。"""
+        options = report.options
+        hints: list[str] = []
+        if not options.dependencies_enabled:
+            hints.append(
+                "当前未启用依赖分析，因此不会生成依赖图、推荐阅读和结构热点。"
+            )
+        if not options.git_enabled:
+            hints.append(
+                "当前未启用 Git 分析，因此不会生成 Git 变更热点。"
+            )
+        if hints:
+            lines.extend(["", "## 分析范围提示", ""])
+            lines.extend(f"- {hint}" for hint in hints)
+            if options.profile != "deep":
+                lines.append(
+                    "- 如需完整导航和 Git 分析，请重新运行："
+                    "`python -m repopath . --profile deep`。"
+                )
+
+    @staticmethod
+    def _enabled_analyzers(report: RepositoryReport) -> str:
+        """返回摘要中实际启用的 Analyzer 名称。"""
+        names = ["files", "statistics"]
+        options = report.options
+        if options.python_enabled:
+            names.append("python")
+        if options.cpp_enabled:
+            names.append("cpp")
+        if options.git_enabled:
+            names.append("git")
+        if options.dependencies_enabled:
+            names.append("dependencies")
+        if options.insights_enabled:
+            names.append("insights")
+        return ", ".join(names)
 
     @staticmethod
     def _timestamp() -> str:
