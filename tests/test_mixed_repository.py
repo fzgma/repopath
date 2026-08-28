@@ -24,13 +24,21 @@ def test_mixed_repository_report_contains_python_and_cpp_sections() -> (
     assert "## C++ 分析" in markdown
     assert payload["cpp"]["file_count"] == 3
     assert payload["python"]["function_count"] == 5
-    assert payload["schema_version"] == "0.3"
+    assert payload["schema_version"] == "0.4"
     assert payload["overview"]["dependency_nodes"] == 8
     assert payload["insights"]["reading_order"]
     assert "## 推荐阅读顺序" in markdown
     assert "## 文件清单" not in markdown
-    assert "依赖分最高 35 分" in markdown
-    assert "风险分等于依赖分加 Git 分" in markdown
+    assert "阅读优先级" in markdown
+    assert "变更关注度" in markdown
+    assert "风险分" not in markdown
+    assert "hotspots" not in payload["insights"]
+    assert (
+        "total" not in payload["insights"]["module_scores"][0]["scores"]
+    )
+    score_fields = payload["insights"]["module_scores"][0]["scores"]
+    assert "reading_priority_score" in score_fields
+    assert "change_attention_score" in score_fields
     assert any(
         edge["kind"] == "include"
         for edge in payload["dependencies"]["edges"]

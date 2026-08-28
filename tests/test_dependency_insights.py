@@ -32,8 +32,28 @@ def test_dependency_graph_detects_cycles_and_entry_paths() -> None:
     )
     assert report.insights.module_scores == sorted(
         report.insights.module_scores,
-        key=lambda item: (-item.total_score, item.path),
+        key=lambda item: (
+            -item.reading_priority_score,
+            item.path,
+        ),
     )
+
+
+def test_scores_are_split_into_navigation_and_change_attention() -> (
+    None
+):
+    """验证两类聚合分数使用各自的组成项。"""
+    report = analyze_repository(FIXTURE_ROOT)
+
+    for item in report.insights.module_scores:
+        assert item.reading_priority_score == round(
+            item.size_score + item.dependency_score + item.entry_score,
+            2,
+        )
+        assert item.change_attention_score == round(
+            item.dependency_score + item.git_score,
+            2,
+        )
 
 
 def test_reading_order_falls_back_to_scores_without_entry_points(

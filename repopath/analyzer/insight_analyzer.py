@@ -6,7 +6,7 @@ from ..model.insight import (
     ReadingPath,
     ReadingRecommendation,
     RepositoryInsights,
-    RiskHotspot,
+    ChangeAttention,
 )
 from ..model.result import AnalysisResult, AnalysisState, AnalyzerName
 from .base import Analyzer
@@ -20,7 +20,7 @@ class InsightAnalyzer(Analyzer):
     def analyze(
         self, context: AnalysisContext, state: AnalysisState
     ) -> AnalysisResult:
-        """计算模块评分、阅读顺序、入口路径和风险热点。"""
+        """计算阅读优先级、变更关注度和入口路径。"""
         graph = state.artifacts.dependencies
         git = state.artifacts.git
         files = state.artifacts.files
@@ -52,9 +52,11 @@ class InsightAnalyzer(Analyzer):
             git_score = round(
                 min(25.0, git_changes * 2 + recent_changes * 3), 2
             )
-            total_score = round(
-                size_score + dependency_score + entry_score + git_score,
-                2,
+            reading_priority_score = round(
+                size_score + dependency_score + entry_score, 2
+            )
+            change_attention_score = round(
+                dependency_score + git_score, 2
             )
             insights.module_scores.append(
                 ModuleScore(
@@ -72,12 +74,16 @@ class InsightAnalyzer(Analyzer):
                     dependency_score,
                     entry_score,
                     git_score,
-                    total_score,
+                    reading_priority_score,
+                    change_attention_score,
                 )
             )
 
         insights.module_scores.sort(
-            key=lambda item: (-item.total_score, item.path)
+            key=lambda item: (
+                -item.reading_priority_score,
+                item.path,
+            )
         )
         reading_scores = sorted(
             insights.module_scores,
@@ -86,7 +92,7 @@ class InsightAnalyzer(Analyzer):
                 item.entry_distance
                 if item.entry_distance is not None
                 else 10**9,
-                -item.total_score,
+                -item.reading_priority_score,
                 item.path,
             ),
         )
@@ -98,7 +104,7 @@ class InsightAnalyzer(Analyzer):
                     score.node_id,
                     score.path,
                     score.language,
-                    score.total_score,
+                    score.reading_priority_score,
                     score.entry_distance,
                     reasons,
                 )
@@ -110,22 +116,24 @@ class InsightAnalyzer(Analyzer):
                 )
 
         for score in insights.module_scores:
-            risk_score = round(
-                score.dependency_score + score.git_score, 2
-            )
             if score.git_changes and score.dependency_score:
-                insights.hotspots.append(
-                    RiskHotspot(
+                insights.change_attention.append(
+                    ChangeAttention(
                         score.node_id,
                         score.path,
                         score.language,
                         score.dependency_score,
                         score.git_changes,
-                        risk_score,
+                        score.recent_changes,
+                        score.git_score,
+                        score.change_attention_score,
                     )
                 )
-        insights.hotspots.sort(
-            key=lambda item: (-item.risk_score, item.path)
+        insights.change_attention.sort(
+            key=lambda item: (
+                -item.change_attention_score,
+                item.path,
+            )
         )
         state.artifacts.insights = insights
         return AnalysisResult(name=self.name)

@@ -135,7 +135,7 @@ def _render_analysis_scope_hint(
     hints: list[str] = []
     if not options.dependencies_enabled:
         hints.append(
-            "依赖分析未启用，依赖关系、推荐阅读和结构热点不会生成。"
+            "依赖分析未启用，依赖关系、推荐阅读和变更关注模块不会生成。"
         )
     if not options.git_enabled:
         hints.append("Git 分析未启用，Git 变更热点不会生成。")
@@ -151,7 +151,7 @@ def _render_analysis_scope_hint(
 def _render_overview(
     report: RepositoryReport, st: StreamlitApi
 ) -> None:
-    """展示语言、目录、风险热点和分析耗时概览。"""
+    """展示语言、目录、变更关注模块和分析耗时概览。"""
     stats = report.stats
     if report.github_rate_limit is not None:
         rate_limit = report.github_rate_limit
@@ -222,8 +222,8 @@ def _render_overview(
         else:
             st.info("没有可展示的目录统计。")
     st.subheader(
-        "结构热点",
-        help="风险分等于依赖分加 Git 分；仅展示同时有依赖关系和 Git 修改记录的模块。",
+        "变更关注模块",
+        help="变更关注度由依赖暴露和 Git 活跃度组成；不代表缺陷概率。",
     )
     scores = {
         item.node_id: item for item in report.insights.module_scores
@@ -237,9 +237,9 @@ def _render_overview(
             "代码行": scores[item.node_id].lines
             if item.node_id in scores
             else 0,
-            "风险分": item.risk_score,
+            "变更关注度": item.change_attention_score,
         }
-        for item in report.insights.hotspots[
+        for item in report.insights.change_attention[
             : report.options.result_limit
         ]
     ]
@@ -258,9 +258,9 @@ def _render_overview(
             not report.options.dependencies_enabled
             or not report.options.git_enabled
         ):
-            st.info("结构热点需要同时启用依赖分析和 Git 分析。")
+            st.info("变更关注模块需要同时启用依赖分析和 Git 分析。")
         else:
-            st.info("当前没有同时具有依赖中心度和 Git 修改热度的文件。")
+            st.info("当前没有同时具有依赖暴露和 Git 活跃度的文件。")
     with st.expander("Analyzer 耗时"):
         durations: list[Row] = [
             {"Analyzer": name, "秒": duration}
@@ -302,7 +302,7 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
         keyword = st.text_input("路径关键词", key="reading_keyword")
     with filters[3]:
         sort_by = st.selectbox(
-            "阅读排序", ["推荐顺序", "核心评分"], key="reading_sort"
+            "阅读排序", ["推荐顺序", "阅读优先级"], key="reading_sort"
         )
     items = [
         item
@@ -314,11 +314,14 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
         )
         and (not keyword or keyword.lower() in item.path.lower())
     ]
-    if sort_by == "核心评分":
+    if sort_by == "阅读优先级":
         visible = _limited_sorted(
             items,
             reading_limit,
-            key=lambda item: (-item.score, item.path),
+            key=lambda item: (
+                -item.reading_priority_score,
+                item.path,
+            ),
         )
     else:
         visible = items[:reading_limit]
@@ -334,7 +337,7 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
             "排名": item.rank,
             "路径": item.path,
             "语言": item.language,
-            "总分": item.score,
+            "阅读优先级": item.reading_priority_score,
             "入口距离": str(item.entry_distance)
             if item.entry_distance is not None
             else "不可达",
@@ -357,15 +360,16 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
     st.subheader(
         "评分明细",
         help=(
-            "总分最高 100 分：规模最高 20 分；依赖分最高 35 分，"
-            "每个入边计 7 分、每个出边计 2 分；入口分最高 20 分，"
-            "每远离入口一层减 4 分；Git 分最高 25 分。"
+            "阅读优先级由规模、依赖和入口组成；变更关注度由依赖暴露和 Git 活跃度组成。"
         ),
     )
     score_items = _limited_sorted(
         report.insights.module_scores,
         reading_limit,
-        key=lambda item: (-item.total_score, item.path),
+        key=lambda item: (
+            -item.reading_priority_score,
+            item.path,
+        ),
     )
     scores: list[Row] = [
         {
@@ -375,7 +379,8 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
             "依赖": item.dependency_score,
             "入口": item.entry_score,
             "Git": item.git_score,
-            "总分": item.total_score,
+            "阅读优先级": item.reading_priority_score,
+            "变更关注度": item.change_attention_score,
         }
         for item in score_items
     ]
@@ -430,7 +435,9 @@ def _render_module_detail(
                 else "不可达"
             )
             st.write(
-                f"核心评分：{score.total_score}；入口距离：{distance}"
+                f"阅读优先级：{score.reading_priority_score}；"
+                f"变更关注度：{score.change_attention_score}；"
+                f"入口距离：{distance}"
             )
         if recommendation is not None:
             st.write(f"推荐原因：{'；'.join(recommendation.reasons)}")

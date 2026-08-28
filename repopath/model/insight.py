@@ -1,11 +1,11 @@
-"""核心评分、阅读顺序和风险热点模型。"""
+"""阅读优先级和变更关注度模型。"""
 
 from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
 class ModuleScore:
-    """保存模块总分及其可解释评分组成。"""
+    """保存模块的两类聚合分数及其可解释组成。"""
 
     node_id: str
     label: str
@@ -21,7 +21,8 @@ class ModuleScore:
     dependency_score: float
     entry_score: float
     git_score: float
-    total_score: float
+    reading_priority_score: float
+    change_attention_score: float
 
 
 @dataclass(frozen=True)
@@ -32,7 +33,7 @@ class ReadingRecommendation:
     node_id: str
     path: str
     language: str
-    score: float
+    reading_priority_score: float
     entry_distance: int | None
     reasons: tuple[str, ...]
 
@@ -47,20 +48,22 @@ class ReadingPath:
 
 
 @dataclass(frozen=True)
-class RiskHotspot:
-    """表示依赖重要性与修改热度共同较高的文件。"""
+class ChangeAttention:
+    """表示依赖暴露和修改活跃度共同较高的文件。"""
 
     node_id: str
     path: str
     language: str
     dependency_score: float
     git_changes: int
-    risk_score: float
+    recent_changes: int
+    git_score: float
+    change_attention_score: float
 
 
 @dataclass
 class RepositoryInsights:
-    """保存统一核心评分、阅读顺序和风险热点。"""
+    """保存阅读优先级、变更关注度和阅读路径。"""
 
     module_scores: list[ModuleScore] = field(
         default_factory=list[ModuleScore]
@@ -71,6 +74,6 @@ class RepositoryInsights:
     reading_paths: list[ReadingPath] = field(
         default_factory=list[ReadingPath]
     )
-    hotspots: list[RiskHotspot] = field(
-        default_factory=list[RiskHotspot]
+    change_attention: list[ChangeAttention] = field(
+        default_factory=list[ChangeAttention]
     )

@@ -222,7 +222,8 @@ class JsonRenderer:
                             "dependency": item.dependency_score,
                             "entry": item.entry_score,
                             "git": item.git_score,
-                            "total": item.total_score,
+                            "reading_priority_score": item.reading_priority_score,
+                            "change_attention_score": item.change_attention_score,
                         },
                     }
                     for item in report.insights.module_scores
@@ -233,7 +234,7 @@ class JsonRenderer:
                         "node_id": item.node_id,
                         "path": item.path,
                         "language": item.language,
-                        "score": item.score,
+                        "reading_priority_score": item.reading_priority_score,
                         "entry_distance": item.entry_distance,
                         "reasons": list(item.reasons),
                     }
@@ -247,16 +248,18 @@ class JsonRenderer:
                     }
                     for item in report.insights.reading_paths
                 ],
-                "hotspots": [
+                "change_attention": [
                     {
                         "node_id": item.node_id,
                         "path": item.path,
                         "language": item.language,
                         "dependency_score": item.dependency_score,
                         "git_changes": item.git_changes,
-                        "risk_score": item.risk_score,
+                        "recent_changes": item.recent_changes,
+                        "git_score": item.git_score,
+                        "change_attention_score": item.change_attention_score,
                     }
-                    for item in report.insights.hotspots
+                    for item in report.insights.change_attention
                 ],
             },
             "git": {

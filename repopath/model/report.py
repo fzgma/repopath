@@ -21,7 +21,7 @@ class RepositoryReport:
     repository: Repository
     source: RepositorySource | None = None
     github_rate_limit: GitHubRateLimit | None = None
-    schema_version: str = "0.3"
+    schema_version: str = "0.4"
     tool_version: str = __version__
     generated_at: str = ""
     options: AnalysisOptions = field(default_factory=AnalysisOptions)

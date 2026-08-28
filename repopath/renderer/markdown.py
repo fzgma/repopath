@@ -318,7 +318,7 @@ class MarkdownRenderer:
         if insights.reading_order:
             lines.extend(
                 [
-                    "| 排名 | 文件 | 语言 | 总分 | 入口距离 | 推荐原因 |",
+                    "| 排名 | 文件 | 语言 | 阅读优先级 | 入口距离 | 推荐原因 |",
                     "| ---: | --- | --- | ---: | ---: | --- |",
                 ]
             )
@@ -333,7 +333,7 @@ class MarkdownRenderer:
                         item.rank,
                         f"`{markdown_cell(item.path)}`",
                         item.language,
-                        f"{item.score:.2f}",
+                        f"{item.reading_priority_score:.2f}",
                         distance,
                         markdown_cell("；".join(item.reasons)),
                     )
@@ -344,25 +344,25 @@ class MarkdownRenderer:
         lines.extend(
             [
                 "",
-                "## 核心模块评分",
+                "## 模块评分",
                 "",
-                "> 规模分最高 20 分，按每 25 行非空代码计 1 分；依赖分最高 35 分"
-                "，按每个入边 7 分和每个出边 2 分计算；入口分最高 20 分，入口为 20 "
-                "分且每远离入口一层减 4 分；Git 分最高 25 分，按历史修改和近 90 天"
-                "修改次数计算。",
+                "> 阅读优先级由规模、依赖和入口组成；变更关注度由依赖暴露和 Git 活跃度组成。",
                 "",
             ]
         )
         if insights.module_scores:
             lines.extend(
                 [
-                    "| 文件 | 规模 | 依赖 | 入口 | Git | 总分 |",
-                    "| --- | ---: | ---: | ---: | ---: | ---: |",
+                    "| 文件 | 规模 | 依赖 | 入口 | Git | 阅读优先级 | 变更关注度 |",
+                    "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
                 ]
             )
             for item in sorted(
                 insights.module_scores,
-                key=lambda score: (-score.total_score, score.path),
+                key=lambda score: (
+                    -score.reading_priority_score,
+                    score.path,
+                ),
             )[:reading_limit]:
                 lines.append(
                     markdown_row(
@@ -371,7 +371,8 @@ class MarkdownRenderer:
                         f"{item.dependency_score:.2f}",
                         f"{item.entry_score:.2f}",
                         f"{item.git_score:.2f}",
-                        f"{item.total_score:.2f}",
+                        f"{item.reading_priority_score:.2f}",
+                        f"{item.change_attention_score:.2f}",
                     )
                 )
         else:
@@ -380,31 +381,33 @@ class MarkdownRenderer:
         lines.extend(
             [
                 "",
-                "## 风险热点",
+                "## 变更关注模块",
                 "",
-                "> 风险分等于依赖分加 Git 分，仅列出同时具有依赖关系和 Git 修改记录的模块。",
+                "> 变更关注度由依赖暴露和 Git 活跃度组成，不代表缺陷概率。",
                 "",
             ]
         )
-        if insights.hotspots:
+        if insights.change_attention:
             lines.extend(
                 [
-                    "| 文件 | 语言 | 依赖分 | 修改次数 | 风险分 |",
+                    "| 文件 | 语言 | 依赖分 | 修改次数 | 变更关注度 |",
                     "| --- | --- | ---: | ---: | ---: |",
                 ]
             )
-            for item in insights.hotspots[:limit]:
+            for item in insights.change_attention[:limit]:
                 lines.append(
                     markdown_row(
                         f"`{markdown_cell(item.path)}`",
                         item.language,
                         f"{item.dependency_score:.2f}",
                         item.git_changes,
-                        f"{item.risk_score:.2f}",
+                        f"{item.change_attention_score:.2f}",
                     )
                 )
         else:
-            lines.append("未检测到同时具有依赖中心度和修改热度的文件。")
+            lines.append(
+                "未检测到同时具有依赖暴露和 Git 活跃度的文件。"
+            )
 
         lines.extend(["", "## Git 历史", ""])
         if not git.available:
@@ -688,17 +691,17 @@ class MarkdownRenderer:
                     f"`{markdown_cell(' -> '.join(item.nodes))}`"
                 )
 
-        lines.extend(["", "## 结构热点", ""])
-        if insights.hotspots:
-            for item in insights.hotspots[:10]:
+        lines.extend(["", "## 变更关注模块", ""])
+        if insights.change_attention:
+            for item in insights.change_attention[:10]:
                 lines.append(
                     f"- `{markdown_cell(item.path)}`："
                     f"依赖分 {item.dependency_score:.2f}，"
                     f"Git 修改 {item.git_changes} 次，"
-                    f"关注分 {item.risk_score:.2f}"
+                    f"变更关注度 {item.change_attention_score:.2f}"
                 )
         else:
-            lines.append("未检测到结构热点。")
+            lines.append("未检测到变更关注模块。")
 
         lines.extend(["", "## 循环依赖", ""])
         if graph.cycles:
@@ -749,7 +752,7 @@ class MarkdownRenderer:
         hints: list[str] = []
         if not options.dependencies_enabled:
             hints.append(
-                "当前未启用依赖分析，因此不会生成依赖图、推荐阅读和结构热点。"
+                "当前未启用依赖分析，因此不会生成依赖图、推荐阅读和变更关注模块。"
             )
         if not options.git_enabled:
             hints.append(
