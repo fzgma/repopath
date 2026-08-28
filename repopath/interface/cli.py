@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 from ..core.service import (
@@ -168,6 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     """解析参数、运行 Pipeline 并输出 Markdown 报告。"""
+    _configure_output_encoding()
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.rate_limit:
@@ -226,6 +228,14 @@ def main(argv: list[str] | None = None) -> int:
             "热点时使用 --profile deep。"
         )
     return 0
+
+
+def _configure_output_encoding() -> None:
+    """将 CLI 标准输出统一为 UTF-8，避免 Windows 编码错误。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 def _resolve_source(

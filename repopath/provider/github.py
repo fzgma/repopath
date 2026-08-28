@@ -17,6 +17,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlparse
 from urllib.request import OpenerDirector, Request, build_opener
 
+from .. import __version__
 from ..model.repository import (
     GitHubRateLimit,
     Repository,
@@ -295,7 +296,7 @@ class GitHubApiClient:
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "RepoPath/0.7.0",
+            "User-Agent": f"RepoPath/{__version__}",
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
