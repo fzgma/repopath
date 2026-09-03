@@ -1,213 +1,78 @@
 # RepoPath
 
-**一个帮助开发者和编程 Agent 快速理解陌生代码仓库的本地多语言分析工具。**
+> 帮助开发者和编程 Agent 快速理解陌生代码仓库的本地多语言分析工具。
 
-## 项目说明
+RepoPath 扫描本地目录或公开 GitHub 仓库，分析代码结构、模块依赖和 Git 历史，生成**阅读优先级、推荐阅读顺序、变更关注度和 Markdown / JSON 报告**。
 
-RepoPath 使用 Python 编写。输入本地仓库目录或公开 GitHub 仓库后，工具会扫描文件结构、代码规模、Python 模块关系、C++ 基础静态结构和可用的 Git 历史，并生成统一依赖图、可解释的阅读优先级与变更关注度、推荐阅读顺序以及 Markdown 或 JSON 报告。
+Release 中的版本为纯CLI版。如需使用UI，请先clone项目或点击以下链接体验
 
-项目的目标是在阅读大量源码前，先建立仓库的整体认知，辅助定位入口、核心模块、依赖关系和近期演进情况。
+## 🚀立即体验
 
-支持本地目录和公开 GitHub 仓库分析。GitHub 分析会固定到一个提交快照，复用本地静态分析能力；Git 演进统计在远程快照中会明确降级为不可用。
+无需本地部署，点击链接即可使用：
 
-## 一、主要功能
+ ### [Repopath](https://repopath.streamlit.app)
 
-### 1. 项目结构与代码统计
 
-- 扫描仓库文件，跳过 `.git`、虚拟环境、缓存目录和指定输出文件
-- 统计文件数、非空行数、注释行数、语言分布和主要目录
-- 将 C++ 源文件与头文件合并为同一语言族统计
+## 1. 功能
 
-### 2. Python 分析
+* **代码分析**：文件结构、代码规模、语言分布
+* **Python**：AST、函数、类、import、入口和模块依赖
+* **C++**：include、函数、类/结构体、命名空间和入口
+* **依赖分析**：统一依赖图、循环依赖、孤立模块
+* **阅读导航**：阅读优先级、推荐阅读顺序、入口路径
+* **变更关注**：结合依赖关系和 Git 活跃度定位重点模块
+* **Git 分析**：提交趋势、churn、热点文件、共同修改和贡献者
+* **GitHub**：支持公开仓库、分支、标签和提交 SHA
+* **报告**：Markdown / JSON
+* **UI**：Streamlit 可视化分析工作台
 
-- 使用 AST 识别函数、类和 import
-- 识别 `main.py`、`manage.py`、`__main__.py` 及 `__name__ == "__main__"` 入口
-- 解析本地模块和相对导入关系
-- 根据代码规模、本地引用次数和入口特征排序核心模块候选
+## 2. 快速开始
 
-### 3. C++ 基础静态分析
+要求 **Python 3.11+**。
 
-- 识别 `.cpp`、`.cc`、`.cxx`、`.h`、`.hpp`、`.hh` 和 `.hxx` 文件
-- 提取 `#include`、函数、类/结构体、命名空间和 `main` 入口
-- 识别仓库内可解析的本地 include 依赖
+### CLI
 
-### 4. Git 历史分析
-
-- 汇总提交数、首次和最近提交时间、主要贡献者与最近提交
-- 统计文件提交次数、代码增删量、月度趋势和最近 30/90 天活跃度
-- 识别共同修改文件、目录贡献者、活跃文件和长期稳定文件
-- 没有可用 Git 历史时保留其他分析结果，并在报告中给出提示
-
-### 5. 依赖图与阅读导航
-
-- 将 Python import 和 C++ include 合并为统一依赖图
-- 统计入度、出度、循环依赖、孤立模块和目录依赖
-- 按代码规模、依赖中心度、入口距离和 Git 热度生成可解释评分
-- 输出推荐阅读顺序、入口依赖路径和变更关注模块
-
-### 6. 报告与界面
-
-- 输出 Markdown 报告，便于阅读和提交到其他工具
-- 输出 JSON 报告，便于后续处理和集成
-- 提供 Streamlit 仓库阅读工作台，在同一条 Pipeline 上查看概览、阅读路线、依赖、Python、C++、Git 和报告
-- 支持快速、标准和深度分析模式、Pipeline 阶段进度、失败建议，以及 Markdown/JSON 完整报告下载
-- 支持按语言、目录、关键词筛选并排序阅读路线、依赖边和 Git 热点；可选择模块查看评分、推荐原因和双向依赖
-- 支持 `owner/repository`、`github.com/owner/repository` 或完整网页地址形式的公开 GitHub 仓库，并可指定分支、标签或提交 SHA
-
-## 二、项目结构
-
-```text
-app.py                      # Streamlit 根目录入口和依赖注入
-repopath.py                 # 根目录 CLI 兼容启动脚本
-run_streamlit.py            # Streamlit bootstrap 启动脚本
-repopath/
-  analyzer/
-    file_analyzer.py        # 文件扫描和代码行统计
-    python/                 # Python AST 与模块依赖分析
-    cpp/                    # C++ 基础静态分析
-    git_analyzer.py         # Git 历史分析
-    dependency_analyzer.py  # 统一依赖图
-    insight_analyzer.py     # 评分、阅读路线和变更关注度
-  core/                     # Context、Pipeline、Composer 和分析服务
-  interface/
-    cli.py                  # 命令行入口
-    ui/                     # Streamlit 表单、会话状态和报告视图
-  model/                    # 仓库、依赖、洞察和报告模型
-  provider/                 # 文件系统、Git 与 GitHub 快照数据来源
-  renderer/                 # Markdown 和 JSON 输出
-tests/                      # Analyzer、依赖图、配置、Git、UI 和混合仓库测试
-requirements.txt            # Streamlit UI 依赖
-requirements-dev.txt        # 测试依赖
-```
-
-分析数据流如下：
-
-```text
-RepositorySource -> Provider -> Analyzer Pipeline
-                                     |
-                                     v
-                    AnalysisResult + AnalysisArtifacts
-                                     |
-                                     v
-          Composer -> RepositoryReport -> UI / Renderer
-```
-
-`Provider` 读取原始数据，`Analyzer` 只负责分析，`AnalysisResult` 保存执行元数据，`AnalysisArtifacts` 保存具名领域产物，`Composer` 合并统一报告。CLI 和 UI 共用同一条 Core Pipeline；UI 不直接导入 Analyzer、Provider 或 Git 命令实现。
-
-## 三、安装与运行
-
-### 1. Python 版本要求
-
-最低要求：**Python 3.11**。
-
-项目使用 `StrEnum` 等 Python 3.11 语法。CI 当前验证 Python 3.11、3.12、3.13 和 3.14。
-
-### 2. 创建虚拟环境
-
-Windows PowerShell：
+核心 CLI 无需第三方依赖：
 
 ```powershell
-py -m venv .venv
-.\.venv\Scripts\Activate.ps1
+python -m repopath .
+python -m repopath . -o report.md
+python -m repopath . --format json -o report.json
 ```
 
-macOS 或 Linux：
+查看帮助：
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
+```powershell
+python -m repopath -h
 ```
 
-### 3. 安装依赖
-
-CLI 核心功能仅依赖 Python 标准库，在项目根目录可直接运行。
-
-使用 Streamlit UI 时安装运行依赖：
+### Streamlit
 
 ```powershell
 python -m pip install -r requirements.txt
+python run_streamlit.py
 ```
 
-开发和运行测试时安装开发依赖：
+支持 `quick`、`standard`、`deep` 三种分析模式。
+
+### GitHub
 
 ```powershell
-python -m pip install -r requirements-dev.txt
-```
-
-### 4. 生成报告
-
-在项目根目录执行以下任一命令。两种方式调用同一个 CLI 和 Core Pipeline：
-
-```powershell
-python -m repopath . -o REPOPATH_REPORT.md
-python repopath.py . -o REPOPATH_REPORT.md
-```
-
-生成 JSON 报告：
-
-```powershell
-python -m repopath . --format json -o REPOPATH_REPORT.json
-```
-
-`-o` 用于指定输出路径；未指定时默认生成 `REPOPATH_REPORT.md`。输出文件会自动从本次扫描中排除。
-
-Markdown 默认生成适合快速阅读的摘要，包含项目概览、入口、推荐阅读、变更关注模块和循环依赖。需要完整分析结果时使用 `--detail full`，也可以使用等价的 `--verbose`；JSON 始终输出完整结构：
-
-常用分析参数：
-
-```powershell
-python -m repopath . --profile deep --git-period 90 --result-limit 30
-python -m repopath . --exclude "generated/*" --max-file-size 2097152
-python -m repopath . --reading-limit 10 --include-file-list
-python -m repopath . --no-cpp --no-git
-python -m repopath owner/repository --github-limits archive_mb=200 --github-limits files=20000 --github-limits content_mb=200 --github-limits file_mb=20
-```
-
-常用长参数支持短别名：`-f/--format`、`-d/--detail`、
-`-v/--verbose`、`-c/--config`、`-p/--profile`、`-e/--exclude`、
-`-m/--max-file-size`、`-g/--git-period`、`-n/--result-limit`、
-`-l/--reading-limit`、`-i/--include-file-list`；输出路径仍使用
-`-o/--output`。
-
-分析公开 GitHub 仓库：
-
-```powershell
-python -m repopath https://github.com/owner/repository
-python -m repopath github.com/owner/repository --ref v1.2.3 -o repository.md
 python -m repopath owner/repository
+python -m repopath owner/repository --ref main
 ```
 
-远程分析会先读取 GitHub Core API 的当前额度，再将默认分支或 `--ref` 解析为固定提交 SHA，最后下载一次该提交的 zipball 快照。指定 `--ref` 时共使用2次 GitHub REST 请求；默认分支额外读取一次仓库信息。额度查询不计入 GitHub Core API 配额。概览会展示本次读取到的 `limit`、`remaining` 与 `reset`。报告会记录仓库地址和固定提交；不会克隆仓库，也不会执行目标仓库代码。
+GitHub 分析会固定到提交 SHA 后下载快照进行静态分析，**不会克隆仓库或执行目标代码**。
 
-匿名 GitHub API 额度有限。可选地设置仅有公开仓库读取权限的 Token，以使用 GitHub 账户额度；RepoPath 不会将 Token 写入配置或报告：
+## 3. 配置
 
-```powershell
-$env:GITHUB_TOKEN = "github_pat_..."
-python -m repopath github.com/owner/repository --ref main
-```
-
-仅查询当前额度而不读取仓库或生成报告：
-
-```powershell
-python -m repopath --rate-limit
-```
-
-使用 `python -m repopath --help` 查看完整参数。
-
-### 5. 仓库配置
-
-仓库根目录可创建 `.repopath.toml`：
+在仓库根目录创建 `.repopath.toml`：
 
 ```toml
 [scan]
 profile = "deep"
 max_file_size = 2097152
-follow_symlinks = false
 exclude = ["generated/*", "*.min.js"]
-
-[analyzers]
-# 可选：显式覆盖 profile 中的单项开关
-# cpp = false
 
 [git]
 period = "all"
@@ -215,8 +80,6 @@ period = "all"
 [github]
 archive_max_mb = 100
 file_limit = 10000
-content_max_mb = 100
-file_max_mb = 10
 
 [report]
 limit = 50
@@ -224,106 +87,52 @@ reading_limit = 10
 include_file_list = false
 ```
 
-首次通过 CLI 分析仓库时，如果配置目录缺少 `.repopath.toml`，RepoPath 会创建以上默认配置后再读取。本地仓库的配置目录是仓库根目录；GitHub 仓库的配置目录是运行命令的当前目录，绝不写入远程仓库。UI 会在实际点击本地“分析仓库”时执行相同行为；仅打开页面不会写入文件。`--config` 可指定其他配置文件，缺失的显式配置文件不会自动创建。
+配置优先级：
 
-覆盖顺序为：CLI 参数 > `.repopath.toml` > 内置默认值。配置使用 Python 标准库 `tomllib` 读取。`report.limit` 控制通用结果列表上限，`report.reading_limit` 单独控制推荐阅读和评分明细，默认展示 10 个文件；`report.include_file_list` 控制 Markdown 是否包含完整文件清单，默认关闭。
-
-评分拆分为两个互不替代的指标：阅读优先级由规模分（最高 20 分）、依赖分（最高 35 分）和入口分（最高 20 分）相加；变更关注度由依赖分和 Git 分（最高 25 分）相加。规模分每 25 行非空代码计 1 分；依赖分按每个入边 7 分、出边 2 分计算；入口分从 20 分起按距离每层减 4 分；Git 分按历史修改次数和近 90 天修改次数累计。推荐阅读顺序优先列出入口及入口可达模块，再按阅读优先级排序。变更关注模块仅表示依赖暴露与 Git 活跃度同时存在，不代表缺陷概率或代码质量。
-
-### 6. 启动 Streamlit UI
-
-安装 `requirements.txt` 后，在项目根目录执行：
-
-```powershell
-python run_streamlit.py
+```text
+CLI > .repopath.toml > 默认值
 ```
 
-`run_streamlit.py` 会找到根目录的 `app.py`，并通过 Streamlit bootstrap 启动。启动完成后终端会显示实际本地访问地址。
+## 4. 项目结构
 
-页面提供三个分析模式：
-
-| 模式 | 执行内容 | 适用场景 |
-| --- | --- | --- |
-| 快速 | 文件扫描、语言识别、代码规模和目录统计 | 先确认仓库范围 |
-| 标准 | 快速模式加 Python AST、C++ 基础结构和 Git 历史统计 | 了解代码组成和演进 |
-| 深度 | 全部 Analyzer，包含依赖图、评分、阅读路线和 Git 热点 | 进行完整代码阅读 |
-
-页面会先读取目标目录 `.repopath.toml` 的模式和高级配置，再应用用户在页面中选择的模式与高级参数。UI 覆盖顺序为：内置默认值 < `.repopath.toml` < 已选择模式 < UI 高级配置。高级配置可设置 Git 历史时间范围、单文件读取上限、通用页面结果数量、阅读与评分数量，以及 Markdown 文件清单开关；页面截断只影响视图，Markdown 和 JSON 下载始终保留完整 `RepositoryReport`。
-
-如果配置文件使用 `fast` 模式，报告只包含文件和统计结果，依赖图、推荐阅读、变更关注模块及 Git 热点不会生成。需要完整导航时可在命令行使用 `--profile deep`，或修改配置文件
-
-## 四、使用方式
-
-### 命令行
-
-1. 将命令中的 `.` 替换为待分析仓库的本地路径，或在目标仓库根目录执行命令。
-2. 使用 `-o` 指定 Markdown 或 JSON 输出文件。
-3. 打开生成的报告，查看概览、语言统计、模块依赖、C++ 分析和 Git 历史。
-
-例如：
-
-```powershell
-python -m repopath D:/path/to/repo -o D:\reports\sample-project.md
+```text
+.
+├── app.py
+├── repopath.py
+├── run_streamlit.py
+├── repopath/
+│   ├── analyzer/       # 文件、Python、C++、Git、依赖和洞察分析
+│   ├── core/           # Pipeline 和核心服务
+│   ├── interface/      # CLI / Streamlit
+│   ├── model/          # 数据模型
+│   ├── provider/       # 文件系统、Git、GitHub
+│   └── renderer/       # Markdown / JSON
+├── tests/
+├── requirements.txt
+└── requirements-dev.txt
 ```
 
-### Streamlit UI
+## 5. 报告
 
-1. 启动 `run_streamlit.py`。
-2. 选择本地目录或 GitHub 公开仓库，再输入对应路径或仓库地址；GitHub 模式可选填分支、标签或提交 SHA。
-3. 选择快速、标准或深度模式；需要时在“高级配置”调整 Git 时间范围、最大文件大小、页面结果数量、阅读与评分数量，以及 Markdown 文件清单开关。
-4. 点击“分析仓库”，分析会在后台线程执行，页面按 Pipeline 阶段自动刷新进度；可点击“停止分析”发出协作式取消请求。
-5. 在报告视图选择器中查看概览、推荐阅读、依赖关系、Python、C++、Git 或报告；可按语言、目录和路径筛选并排序阅读路线、依赖边和 Git 热点。
-6. 在推荐阅读页选择模块，可联动查看阅读优先级、变更关注度、推荐原因、正向依赖和反向依赖；在报告页下载完整 Markdown 或 JSON。
+Markdown 默认提供仓库概览、入口、推荐阅读、依赖和变更关注等摘要。
 
-页面会在关键概念处提供帮助说明：阅读优先级用于安排陌生仓库的阅读顺序；变更关注度结合依赖暴露与 Git 活跃度，不表示缺陷概率；Churn 是历史新增和删除行数总和；循环依赖表示模块间的闭环关系。小型依赖图显示为 Graphviz；大型依赖图切换为目录聚合和可筛选的边表。
-
-## 五、报告内容
-
-Markdown 报告包含以下主要部分：
-
-- 概览：文件数、非空行数、注释行数和入口候选数量
-- 语言统计：各语言族的文件数、非空行数与文件占比
-- 项目结构：主要目录，以及可选的完整文件清单
-- Python：核心模块候选、入口、import 和本地模块依赖
-- C++：include、函数、类/结构体、命名空间、入口和本地 include 依赖
-- 统一依赖图：正向依赖、循环依赖、孤立模块和目录聚合
-- 阅读导航：评分明细、推荐顺序、入口路径和变更关注模块
-- Git：提交趋势、代码增删量、文件 churn、共同修改和目录贡献者
-- 运行信息：Schema、工具版本、生成时间和 Analyzer 耗时
-- 分析提示：文件不可读、Python 语法错误或 Git 不可用等警告和错误
-
-JSON 报告提供对应的结构化数据，适合后续脚本处理或接入其他工具。
-
-## 六、测试
-
-项目使用 pytest，覆盖 Python AST、C++、统一依赖图、阅读洞察、TOML 配置、Git 演进、Provider 契约、CLI 参数、Streamlit 页面、UI 会话状态、预设矩阵和 UI 依赖边界。
+生成完整 Markdown：
 
 ```powershell
-python -m pytest -q
+python -m repopath . --detail full -o report.md
 ```
 
-GitHub Actions 会在 Python 3.11 至 3.14 上运行测试。
+JSON 始终输出完整结构，适合脚本、CI/CD 和 Agent 集成。
 
-开发时可额外运行 Pyright：
+## 6. 限制
 
-```powershell
-python -m pyright
-```
+* GitHub 仅支持公开仓库。
+* C++ 使用基础静态分析，不替代完整 C++ AST。
+* Python 不执行目标仓库代码。
+* 动态 import、宏展开和生成文件可能无法准确识别。
+* GitHub 快照不包含 `.git`，因此无法分析远程 Git 历史。
+* 阅读优先级和变更关注度仅用于辅助导航，不代表代码质量或缺陷概率。
 
-## 七、当前限制
+## 7. 开源协议
 
-1. GitHub 仅支持公开仓库；可选 `GITHUB_TOKEN` 只用于提高公开 API 额度，不支持私有仓库、GitHub Enterprise 或缓存。网络超时和不完整读取会最多重试 3 次。
-2. GitHub 快照默认最多下载 100 MB 压缩归档，解压后最多读取 10,000 个文件、100 MB 总内容和 10 MB 单文件；
-这些限制可在配置文件 `[github]`、CLI 的 `--github-limits` 或 UI 高级配置中调整。不符合当前限制或包含不安全路径的归档会被拒绝。
-3. 远程快照不包含本地 `.git`，因此 Git 提交趋势、Churn、共同修改和变更关注度中的 Git 分不会生成。
-4. C++ 使用正则进行基础静态识别，不替代完整 C++ AST、编译数据库或类型分析。
-5. Python 仅解析语法和 import，不执行目标仓库代码。
-6. 本地模块依赖与 C++ include 关系是静态近似结果，动态导入、宏展开和构建系统生成文件可能无法准确反映。
-7. 阅读优先级和变更关注度用于辅助导航，不代表代码质量、缺陷概率或业务重要性的绝对结论。
-8. 本地 Git 热点受提交粒度、历史完整性、重命名和浅克隆影响；Git 不可用时该部分会缺失。
-9. 文件共同修改统计将单次提交最多前 50 个路径用于组合，避免超大提交产生二次方开销。
-10. Streamlit 以后台线程执行分析并每 0.5 秒刷新快照；停止操作是协作式取消，正在执行的单次 Git 命令或网络请求需要返回后才能在下一个检查点停止。
-
-## 八、开源许可
-
-RepoPath 采用 [Apache License 2.0](LICENSE) 开源协议。该协议包含版权许可、专利许可和免责声明；完整条款请参阅 [LICENSE](LICENSE)。
+[Apache License 2.0](LICENSE)
