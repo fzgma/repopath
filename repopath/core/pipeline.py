@@ -18,6 +18,8 @@ from ..model.result import (
     AnalysisResult,
     AnalysisState,
     AnalysisStatus,
+    AnalyzerName,
+    AnalyzerStatus,
 )
 from .context import AnalysisContext
 from .control import AnalysisCancelled
@@ -38,6 +40,23 @@ class Pipeline:
     ) -> AnalysisState:
         """执行所有 Analyzer 并将单个失败转换为结果错误。"""
         state = AnalysisState()
+        prerequisites = {
+            AnalyzerName.STATISTICS: [AnalyzerName.FILES],
+            AnalyzerName.PYTHON: [AnalyzerName.FILES],
+            AnalyzerName.CPP: [AnalyzerName.FILES],
+            AnalyzerName.DEPENDENCIES: [
+                name for name in (AnalyzerName.PYTHON, AnalyzerName.CPP)
+                if context.options.analyzer_enabled(name)
+            ],
+            AnalyzerName.INSIGHTS: [AnalyzerName.DEPENDENCIES],
+        }
+        for analyzer in self.analyzers:
+            if not context.options.analyzer_enabled(analyzer.name):
+                state.add(AnalysisResult(
+                    name=analyzer.name,
+                    status=AnalyzerStatus.NOT_RUN,
+                    reason=f"当前配置未启用 {analyzer.name}（profile={context.options.profile}）",
+                ))
         analyzers = [
             analyzer
             for analyzer in self.analyzers
@@ -46,6 +65,22 @@ class Pipeline:
         total = len(analyzers)
         for index, analyzer in enumerate(analyzers, start=1):
             context.cancellation.raise_if_cancelled()
+            unavailable = [
+                name for name in prerequisites.get(analyzer.name, [])
+                if name not in state.results or not state.results[name].successful
+            ]
+            if unavailable:
+                state.add(AnalysisResult(
+                    name=analyzer.name,
+                    status=AnalyzerStatus.NOT_RUN,
+                    reason="上游分析未完成：" + ", ".join(unavailable),
+                ))
+                if progress_callback:
+                    progress_callback(AnalysisProgress(
+                        analyzer.name, index, total,
+                        int(index / total * 100), AnalysisStatus.FINISHED,
+                    ))
+                continue
             if progress_callback:
                 progress_callback(
                     AnalysisProgress(
@@ -69,6 +104,9 @@ class Pipeline:
             result.duration_seconds = round(
                 perf_counter() - started_at, 6
             )
+            if result.errors:
+                result.status = AnalyzerStatus.FAILED
+                result.reason = "；".join(result.errors)
             state.add(result)
             context.cancellation.raise_if_cancelled()
             if progress_callback:

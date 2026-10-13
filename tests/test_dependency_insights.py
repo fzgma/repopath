@@ -1,10 +1,14 @@
 """统一依赖图和阅读洞察测试。"""
 
+from collections import Counter
 from pathlib import Path
 
-from repopath.core.service import analyze_repository
-from repopath.renderer.markdown import MarkdownRenderer
+import pytest
 
+from repopath.core.service import analyze_repository
+from repopath.model.git import GitSummary
+from repopath.provider.git import GitProvider
+from repopath.renderer.markdown import MarkdownRenderer
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "graph_repo"
 
@@ -39,13 +43,24 @@ def test_dependency_graph_detects_cycles_and_entry_paths() -> None:
     )
 
 
-def test_scores_are_split_into_navigation_and_change_attention() -> (
-    None
-):
+def test_scores_are_split_into_navigation_and_change_attention(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """验证两类聚合分数使用各自的组成项。"""
+    monkeypatch.setattr(
+        GitProvider,
+        "summary",
+        lambda *args: GitSummary(
+            available=True,
+            changed_paths=Counter({"entry.py": 3}),
+            recent_90_days=Counter({"entry.py": 2}),
+        ),
+    )
     report = analyze_repository(FIXTURE_ROOT)
 
+    assert report.change_attention_availability().status == "completed"
     for item in report.insights.module_scores:
+        assert item.git_score is not None
         assert item.reading_priority_score == round(
             item.size_score + item.dependency_score + item.entry_score,
             2,
@@ -54,6 +69,9 @@ def test_scores_are_split_into_navigation_and_change_attention() -> (
             item.dependency_score + item.git_score,
             2,
         )
+    entry = next(item for item in report.insights.module_scores if item.path == "entry.py")
+    assert entry.git_score == 12
+    assert report.insights.change_attention
 
 
 def test_reading_order_falls_back_to_scores_without_entry_points(

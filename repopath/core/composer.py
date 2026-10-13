@@ -28,4 +28,5 @@ def compose_report(
         analyzer_durations=state.durations,
         warnings=state.warnings,
         errors=state.errors,
+        analyzer_results=state.results,
     )

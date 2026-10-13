@@ -2,6 +2,7 @@
 
 from ..model.file import FileRecord
 from ..model.report import RepositoryReport
+from ..model.result import AnalyzerName, AnalyzerStatus
 
 
 def markdown_cell(value: object) -> str:
@@ -148,19 +149,7 @@ class MarkdownRenderer:
         else:
             lines.append("| 暂无 Python 模块 | 0 | 0 | 0 |")
 
-        lines.extend(["", "## 入口候选", ""])
-        if python.entry_points:
-            lines.extend(["| 文件 | 识别依据 |", "| --- | --- |"])
-            for entry in python.entry_points:
-                entry_path = repository.relative_path(entry.path)
-                lines.append(
-                    markdown_row(
-                        f"`{markdown_cell(entry_path)}`",
-                        markdown_cell(entry.reason),
-                    )
-                )
-        else:
-            lines.append("未识别到常见 Python 入口。")
+        self._append_entries(lines, report)
 
         lines.extend(["", "## Python 依赖概览", ""])
         if python.import_counts:
@@ -311,7 +300,7 @@ class MarkdownRenderer:
             else:
                 lines.append("未检测到孤立模块。")
         else:
-            lines.append("当前配置未生成统一依赖图。")
+            lines.append("分析已完成，未发现可构建依赖图的模块。")
 
         insights = report.insights
         lines.extend(["", "## 推荐阅读顺序", ""])
@@ -339,7 +328,7 @@ class MarkdownRenderer:
                     )
                 )
         else:
-            lines.append("当前配置未生成推荐阅读顺序。")
+            lines.append("分析已完成，没有可推荐阅读的模块。")
 
         lines.extend(
             [
@@ -370,9 +359,10 @@ class MarkdownRenderer:
                         f"{item.size_score:.2f}",
                         f"{item.dependency_score:.2f}",
                         f"{item.entry_score:.2f}",
-                        f"{item.git_score:.2f}",
+                        f"{item.git_score:.2f}" if item.git_score is not None else "未计算",
                         f"{item.reading_priority_score:.2f}",
-                        f"{item.change_attention_score:.2f}",
+                        f"{item.change_attention_score:.2f}"
+                        if item.change_attention_score is not None else "未计算",
                     )
                 )
         else:
@@ -600,7 +590,7 @@ class MarkdownRenderer:
                         file.non_empty_lines,
                     )
                 )
-        return "\n".join(lines) + "\n"
+        return self._with_status(lines, report)
 
     def _render_summary(self, report: RepositoryReport) -> str:
         """生成适合人工快速阅读的精简 Markdown 摘要。"""
@@ -648,29 +638,7 @@ class MarkdownRenderer:
         else:
             lines.append("暂无 Python 核心模块候选。")
 
-        lines.extend(["", "## 入口候选", ""])
-        entries = [
-            (
-                repository.relative_path(entry.path),
-                entry.reason,
-            )
-            for entry in report.python.entry_points[:10]
-        ]
-        entries.extend(
-            (
-                repository.relative_path(entry.path),
-                "C++ main",
-            )
-            for entry in report.cpp.entry_points[:10]
-        )
-        if entries:
-            for path, reason in entries[:10]:
-                lines.append(
-                    f"- `{markdown_cell(path)}`："
-                    f"{markdown_cell(reason)}"
-                )
-        else:
-            lines.append("未识别到入口候选。")
+        self._append_entries(lines, report, limit=10)
 
         lines.extend(["", "## 推荐阅读", ""])
         if insights.reading_order:
@@ -680,7 +648,7 @@ class MarkdownRenderer:
                     f"{markdown_cell('；'.join(item.reasons))}"
                 )
         else:
-            lines.append("当前配置未生成推荐阅读顺序。")
+            lines.append("分析已完成，没有可推荐阅读的模块。")
 
         if insights.reading_paths:
             lines.extend(["", "### 入口到推荐模块的路径", ""])
@@ -724,7 +692,96 @@ class MarkdownRenderer:
                     f"- `{markdown_cell(path)}`："
                     f"Churn {change.churn}，提交 {change.commits} 次"
                 )
-        return "\n".join(lines) + "\n"
+        return self._with_status(lines, report)
+
+    @staticmethod
+    def _append_entries(
+        lines: list[str], report: RepositoryReport, limit: int | None = None
+    ) -> None:
+        """分别说明两种语言的执行状态，只对已完成分析报告空入口。"""
+        lines.extend(["", "## 入口候选", ""])
+        for name, label, entries in (
+            (AnalyzerName.PYTHON, "Python", [
+                (entry.path, entry.reason) for entry in report.python.entry_points
+            ]),
+            (AnalyzerName.CPP, "C++", [
+                (entry.path, "C++ main") for entry in report.cpp.entry_points
+            ]),
+        ):
+            result = report.analyzer_result(name)
+            lines.extend(["", f"### {label}", "", f"- 分析状态：`{result.status}`"])
+            if result.reason:
+                lines.append(f"- 原因：{markdown_cell(result.reason)}")
+            if not result.successful:
+                continue
+            if not entries:
+                lines.append(f"未识别到 {label} 入口候选。")
+            for path, reason in entries[:limit]:
+                lines.append(
+                    f"- `{markdown_cell(report.repository.relative_path(path))}`："
+                    f"{markdown_cell(reason)}"
+                )
+
+    @staticmethod
+    def _with_status(lines: list[str], report: RepositoryReport) -> str:
+        """在分析章节旁显示执行证据，避免把缺失结果描述为零结果。"""
+        sections = {
+            "Python 核心模块候选": AnalyzerName.PYTHON,
+            "Python 核心模块": AnalyzerName.PYTHON,
+            "Python 依赖概览": AnalyzerName.PYTHON,
+            "Python 本地模块依赖": AnalyzerName.PYTHON,
+            "C++ 分析": AnalyzerName.CPP,
+            "统一依赖图": AnalyzerName.DEPENDENCIES,
+            "循环依赖": AnalyzerName.DEPENDENCIES,
+            "推荐阅读顺序": AnalyzerName.INSIGHTS,
+            "推荐阅读": AnalyzerName.INSIGHTS,
+            "模块评分": AnalyzerName.INSIGHTS,
+            "变更关注模块": AnalyzerName.INSIGHTS,
+            "Git 历史": AnalyzerName.GIT,
+            "Git 变更热点": AnalyzerName.GIT,
+            "语言统计": AnalyzerName.STATISTICS,
+            "主要目录": AnalyzerName.STATISTICS,
+            "文件清单": AnalyzerName.FILES,
+        }
+        labels = {AnalyzerStatus.NOT_RUN: "未运行", AnalyzerStatus.COMPLETED: "已完成",
+                  AnalyzerStatus.FAILED: "失败"}
+        metrics = {
+            "- 文件数": AnalyzerName.FILES,
+            "- 非空行数": AnalyzerName.STATISTICS,
+            "- 识别语言": AnalyzerName.STATISTICS,
+            "- 注释行": AnalyzerName.STATISTICS,
+            "- Python 入口候选": AnalyzerName.PYTHON,
+            "- C++ 入口候选": AnalyzerName.CPP,
+            "- 依赖节点": AnalyzerName.DEPENDENCIES,
+            "- 依赖边": AnalyzerName.DEPENDENCIES,
+        }
+        output: list[str] = []
+        omit = False
+        for line in lines:
+            if line.startswith("## "):
+                omit = False
+                name = sections.get(line[3:])
+                if name is not None:
+                    result = (
+                        report.change_attention_availability()
+                        if line == "## 变更关注模块"
+                        else report.analyzer_result(name)
+                    )
+                    output.extend([line, "", f"- 分析状态：{labels[result.status]}（`{result.status}`）"])
+                    if result.reason:
+                        output.append(f"- 原因：{markdown_cell(result.reason)}")
+                    output.append("")
+                    omit = result.status != AnalyzerStatus.COMPLETED
+                    continue
+            if omit:
+                continue
+            metric = line.split("：", 1)[0]
+            if metric in metrics:
+                result = report.analyzer_result(metrics[metric])
+                if result.status != AnalyzerStatus.COMPLETED:
+                    line = metric + "：" + labels[result.status]
+            output.append(line)
+        return "\n".join(output) + "\n"
 
     @staticmethod
     def _append_summary_messages(

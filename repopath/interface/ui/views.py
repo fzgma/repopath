@@ -9,14 +9,89 @@ from typing import Any, TypeAlias, TypeVar
 from ...model.dependency import DependencyEdge
 from ...model.git import FileChangeStats
 from ...model.report import RepositoryReport
+from ...model.result import (
+    AnalysisAvailability,
+    AnalyzerName,
+    AnalyzerStatus,
+)
 from ...renderer.json import JsonRenderer
 from ...renderer.markdown import MarkdownRenderer
 from .state import AnalysisSnapshot, UiRunState
 
-
 StreamlitApi: TypeAlias = Any
 Row: TypeAlias = dict[str, object]
 Item = TypeVar("Item")
+STATUS_LABELS = {
+    AnalyzerStatus.NOT_RUN: "未运行",
+    AnalyzerStatus.COMPLETED: "已完成",
+    AnalyzerStatus.FAILED: "失败",
+}
+
+
+def _render_availability(
+    availability: AnalysisAvailability,
+    st: StreamlitApi,
+    label: str = "分析",
+) -> bool:
+    """在结果附近显示执行状态，返回是否可以展示完成后的结果。"""
+    message = f"{label}状态：{STATUS_LABELS[availability.status]}（{availability.status}）"
+    if availability.reason:
+        message += f"；原因：{availability.reason}"
+    if availability.status == AnalyzerStatus.COMPLETED:
+        st.caption(message)
+        return True
+    if availability.status == AnalyzerStatus.FAILED:
+        st.error(message)
+    else:
+        st.info(message)
+    return False
+
+
+def _render_analyzer_status(
+    report: RepositoryReport, name: AnalyzerName, st: StreamlitApi
+) -> bool:
+    """从实际执行记录判断结果，不根据配置或空列表推断。"""
+    result = report.analyzer_result(name)
+    return _render_availability(
+        AnalysisAvailability(result.status, result.reason), st
+    )
+
+
+def _metric_value(
+    report: RepositoryReport, name: AnalyzerName, value: int
+) -> int | str:
+    """未完成的统计显示状态，避免将缺失数据展示为零。"""
+    result = report.analyzer_result(name)
+    return value if result.successful else STATUS_LABELS[result.status]
+
+
+def _entry_metric(report: RepositoryReport) -> tuple[str, int | str, str]:
+    """合并已完成的语言入口证据，保留部分成功并注明缺失来源。"""
+    paths = set()
+    completed = 0
+    statuses = []
+    details = []
+    for name, label, entries in (
+        (AnalyzerName.PYTHON, "Python", report.python.entry_points),
+        (AnalyzerName.CPP, "C++", report.cpp.entry_points),
+    ):
+        result = report.analyzer_result(name)
+        statuses.append(result.status)
+        details.append(
+            f"{label}：{STATUS_LABELS[result.status]}"
+            + (f"（{result.reason}）" if result.reason else "")
+        )
+        if result.successful:
+            completed += 1
+            paths.update(entry.path for entry in entries)
+    value: int | str
+    if completed == 2:
+        value = len(paths)
+    elif completed:
+        value = f"{len(paths)}（部分）"
+    else:
+        value = "失败" if AnalyzerStatus.FAILED in statuses else "未运行"
+    return "入口", value, "按文件去重，仅统计已完成的语言分析。" + "；".join(details)
 
 
 def render_snapshot(
@@ -55,17 +130,29 @@ def render_report(
     graph = report.dependencies
     metrics = st.columns(6)
     values: list[tuple[str, object, str | None]] = [
-        ("文件数", len(report.files), None),
-        ("非空行", report.stats.total_non_empty_lines, None),
-        ("语言", len(report.stats.language_family_counts), None),
         (
-            "入口",
-            len(graph.entry_nodes),
-            "可作为程序或脚本起点识别到的模块数量。",
+            "文件数",
+            _metric_value(report, AnalyzerName.FILES, len(report.files)),
+            None,
         ),
         (
+            "非空行",
+            _metric_value(
+                report, AnalyzerName.STATISTICS, report.stats.total_non_empty_lines
+            ),
+            None,
+        ),
+        (
+            "语言",
+            _metric_value(
+                report, AnalyzerName.STATISTICS, len(report.stats.language_family_counts)
+            ),
+            None,
+        ),
+        _entry_metric(report),
+        (
             "依赖",
-            len(graph.edges),
+            _metric_value(report, AnalyzerName.DEPENDENCIES, len(graph.edges)),
             "统一依赖图中已识别的直接依赖边数量。",
         ),
         ("耗时", f"{report.elapsed_seconds:.2f}s", None),
@@ -173,6 +260,9 @@ def _render_overview(
             help="GitHub Core API 额度恢复的本地时间。",
         )
     left, right = st.columns(2)
+    statistics_available = _render_analyzer_status(
+        report, AnalyzerName.STATISTICS, st
+    )
     language_rows: list[Row] = [
         {
             "语言": language,
@@ -185,7 +275,7 @@ def _render_overview(
     ]
     with left:
         st.subheader("语言规模")
-        if language_rows:
+        if statistics_available and language_rows:
             st.bar_chart(
                 language_rows,
                 x="语言",
@@ -196,7 +286,7 @@ def _render_overview(
             st.dataframe(
                 language_rows, width="stretch", hide_index=True
             )
-        else:
+        elif statistics_available:
             st.info("没有可展示的语言统计。")
     directory_rows: list[Row] = [
         {
@@ -208,7 +298,7 @@ def _render_overview(
     ]
     with right:
         st.subheader("主要目录")
-        if directory_rows:
+        if statistics_available and directory_rows:
             st.bar_chart(
                 directory_rows,
                 x="目录",
@@ -219,7 +309,7 @@ def _render_overview(
             st.dataframe(
                 directory_rows, width="stretch", hide_index=True
             )
-        else:
+        elif statistics_available:
             st.info("没有可展示的目录统计。")
     st.subheader(
         "变更关注模块",
@@ -243,7 +333,10 @@ def _render_overview(
             : report.options.result_limit
         ]
     ]
-    if rows:
+    attention_available = _render_availability(
+        report.change_attention_availability(), st, "变更关注分析"
+    )
+    if attention_available and rows:
         st.scatter_chart(
             rows,
             x="依赖分",
@@ -253,14 +346,8 @@ def _render_overview(
             height=360,
         )
         st.dataframe(rows, width="stretch", hide_index=True)
-    else:
-        if (
-            not report.options.dependencies_enabled
-            or not report.options.git_enabled
-        ):
-            st.info("变更关注模块需要同时启用依赖分析和 Git 分析。")
-        else:
-            st.info("当前没有同时具有依赖暴露和 Git 活跃度的文件。")
+    elif attention_available:
+        st.info("当前没有同时具有依赖暴露和 Git 活跃度的文件。")
     with st.expander("Analyzer 耗时"):
         durations: list[Row] = [
             {"Analyzer": name, "秒": duration}
@@ -278,6 +365,8 @@ def _render_overview(
 
 def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示筛选后的阅读路线、评分明细和模块详情。"""
+    if not _render_analyzer_status(report, AnalyzerName.INSIGHTS, st):
+        return
     all_items = report.insights.reading_order
     reading_limit = report.options.reading_limit
     filters = st.columns(4)
@@ -327,10 +416,7 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
         visible = items[:reading_limit]
     _caption_count(st, len(items), len(all_items), reading_limit)
     if not items:
-        if not report.options.insights_enabled:
-            st.info("推荐阅读未启用；切换到“深度”模式后重新分析。")
-        else:
-            st.info("当前没有符合筛选条件的推荐阅读模块。")
+        st.info("当前没有符合筛选条件的推荐阅读模块。")
         return
     rows: list[Row] = [
         {
@@ -363,6 +449,9 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
             "阅读优先级由规模、依赖和入口组成；变更关注度由依赖暴露和 Git 活跃度组成。"
         ),
     )
+    _render_availability(
+        report.change_attention_availability(), st, "变更关注分析"
+    )
     score_items = _limited_sorted(
         report.insights.module_scores,
         reading_limit,
@@ -378,9 +467,12 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
             "规模": item.size_score,
             "依赖": item.dependency_score,
             "入口": item.entry_score,
-            "Git": item.git_score,
+            "Git": item.git_score if item.git_score is not None else "未计算",
             "阅读优先级": item.reading_priority_score,
-            "变更关注度": item.change_attention_score,
+            "变更关注度": (
+                item.change_attention_score
+                if item.change_attention_score is not None else "未计算"
+            ),
         }
         for item in score_items
     ]
@@ -434,9 +526,13 @@ def _render_module_detail(
                 if score.entry_distance is not None
                 else "不可达"
             )
+            attention = (
+                score.change_attention_score
+                if score.change_attention_score is not None else "未计算"
+            )
             st.write(
                 f"阅读优先级：{score.reading_priority_score}；"
-                f"变更关注度：{score.change_attention_score}；"
+                f"变更关注度：{attention}；"
                 f"入口距离：{distance}"
             )
         if recommendation is not None:
@@ -471,12 +567,11 @@ def _render_dependencies(
     report: RepositoryReport, st: StreamlitApi
 ) -> None:
     """展示统一依赖边、目录聚合、循环和孤立模块。"""
+    if not _render_analyzer_status(report, AnalyzerName.DEPENDENCIES, st):
+        return
     graph = report.dependencies
     if not graph.nodes:
-        if not report.options.dependencies_enabled:
-            st.info("依赖分析未启用；切换到“深度”模式后重新分析。")
-        else:
-            st.info("当前没有可展示的依赖节点。")
+        st.info("当前没有可展示的依赖节点。")
         return
     filters = st.columns(4)
     with filters[0]:
@@ -652,14 +747,11 @@ def _dependency_dot(
 
 def _render_python(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示 Python import、依赖和符号。"""
+    if not _render_analyzer_status(report, AnalyzerName.PYTHON, st):
+        return
     python = report.python
     if not python.module_paths:
-        if not report.options.python_enabled:
-            st.info(
-                "Python 分析未启用；切换到“标准”或“深度”模式后重新分析。"
-            )
-        else:
-            st.info("当前仓库没有可分析的 Python 文件。")
+        st.info("当前仓库没有可分析的 Python 文件。")
         return
     metrics = st.columns(4)
     metrics[0].metric("模块", len(python.module_paths))
@@ -699,14 +791,11 @@ def _render_python(report: RepositoryReport, st: StreamlitApi) -> None:
 
 def _render_cpp(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示 C++ include、符号和入口。"""
+    if not _render_analyzer_status(report, AnalyzerName.CPP, st):
+        return
     cpp = report.cpp
     if not cpp.files:
-        if not report.options.cpp_enabled:
-            st.info(
-                "C++ 分析未启用；切换到“标准”或“深度”模式后重新分析。"
-            )
-        else:
-            st.info("当前仓库没有可分析的 C++ 文件。")
+        st.info("当前仓库没有可分析的 C++ 文件。")
         return
     metrics = st.columns(4)
     metrics[0].metric("文件", len(cpp.files))
@@ -750,14 +839,11 @@ def _render_cpp(report: RepositoryReport, st: StreamlitApi) -> None:
 
 def _render_git(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示 Git 趋势、热点、贡献者和最近提交。"""
+    if not _render_analyzer_status(report, AnalyzerName.GIT, st):
+        return
     git = report.git
     if not git.available:
-        if not report.options.git_enabled:
-            st.info(
-                "Git 分析未启用；切换到“标准”或“深度”模式后重新分析。"
-            )
-        else:
-            st.info(git.error or "当前目录没有可用的 Git 历史。")
+        st.info(git.error or "当前目录没有可用的 Git 历史。")
         return
     metrics = st.columns(4)
     metrics[0].metric("提交", git.commit_count)

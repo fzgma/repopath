@@ -4,6 +4,7 @@ import json
 
 from ..model.report import RepositoryReport
 from ..model.repository import RepositorySourceType
+from ..model.result import AnalyzerName
 
 
 class JsonRenderer:
@@ -336,5 +337,35 @@ class JsonRenderer:
             ],
             "warnings": report.warnings,
             "errors": report.errors,
+        }
+        payload["analysis"]["analyzers"] = {
+            name: {
+                "status": result.status,
+                "reason": result.reason,
+                "warnings": result.warnings,
+                "errors": result.errors,
+            }
+            for name, result in report.analyzer_results.items()
+        }
+        for name in (AnalyzerName.PYTHON, AnalyzerName.CPP, AnalyzerName.GIT,
+                     AnalyzerName.DEPENDENCIES, AnalyzerName.INSIGHTS):
+            result = report.analyzer_result(name)
+            payload[name]["status"] = result.status
+            payload[name]["reason"] = result.reason
+        overview_fields = {
+            AnalyzerName.FILES: ("file_count",),
+            AnalyzerName.STATISTICS: ("non_empty_lines", "language_count", "comment_lines"),
+            AnalyzerName.PYTHON: ("entry_point_count",),
+            AnalyzerName.CPP: ("cpp_entry_point_count",),
+            AnalyzerName.DEPENDENCIES: ("dependency_nodes", "dependency_edges", "cycle_count"),
+        }
+        for name, keys in overview_fields.items():
+            if not report.analyzer_result(name).successful:
+                for key in keys:
+                    payload["overview"][key] = None
+        attention = report.change_attention_availability()
+        payload["insights"]["change_attention_analysis"] = {
+            "status": attention.status,
+            "reason": attention.reason,
         }
         return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"

@@ -31,6 +31,22 @@ class AnalysisStatus(StrEnum):
     FINISHED = "finished"
 
 
+class AnalyzerStatus(StrEnum):
+    """定义分析器结果的状态，与阶段进度分开。"""
+
+    NOT_RUN = "not_run"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+@dataclass(frozen=True)
+class AnalysisAvailability:
+    """描述一项派生结果是否完成，以及无法计算的原因。"""
+
+    status: AnalyzerStatus
+    reason: str | None = None
+
+
 @dataclass
 class AnalysisArtifacts:
     """保存各 Analyzer 产出的具名领域数据。"""
@@ -56,11 +72,13 @@ class AnalysisResult:
     warnings: list[str] = field(default_factory=list[str])
     errors: list[str] = field(default_factory=list[str])
     duration_seconds: float = 0.0
+    status: AnalyzerStatus = AnalyzerStatus.COMPLETED
+    reason: str | None = None
 
     @property
     def successful(self) -> bool:
         """判断 Analyzer 是否没有产生错误。"""
-        return not self.errors
+        return self.status == AnalyzerStatus.COMPLETED and not self.errors
 
 
 @dataclass
@@ -102,6 +120,7 @@ class AnalysisState:
         return {
             name: result.duration_seconds
             for name, result in self.results.items()
+            if result.status != AnalyzerStatus.NOT_RUN
         }
 
 

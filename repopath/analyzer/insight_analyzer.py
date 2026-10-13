@@ -2,11 +2,11 @@
 
 from ..core.context import AnalysisContext
 from ..model.insight import (
+    ChangeAttention,
     ModuleScore,
     ReadingPath,
     ReadingRecommendation,
     RepositoryInsights,
-    ChangeAttention,
 )
 from ..model.result import AnalysisResult, AnalysisState, AnalyzerName
 from .base import Analyzer
@@ -23,6 +23,10 @@ class InsightAnalyzer(Analyzer):
         """计算阅读优先级、变更关注度和入口路径。"""
         graph = state.artifacts.dependencies
         git = state.artifacts.git
+        git_result = state.results.get(AnalyzerName.GIT)
+        git_available = (
+            git.available and git_result is not None and git_result.successful
+        )
         files = state.artifacts.files
         lines_by_path = {
             context.repository.relative_path(
@@ -37,8 +41,8 @@ class InsightAnalyzer(Analyzer):
             lines = lines_by_path.get(node.path, 0)
             incoming = graph.incoming_counts[node_id]
             outgoing = graph.outgoing_counts[node_id]
-            git_changes = git.changed_paths[node.path]
-            recent_changes = git.recent_90_days[node.path]
+            git_changes = git.changed_paths[node.path] if git_available else None
+            recent_changes = git.recent_90_days[node.path] if git_available else None
             size_score = round(min(20.0, lines / 25), 2)
             dependency_score = round(
                 min(35.0, incoming * 7 + outgoing * 2), 2
@@ -49,14 +53,17 @@ class InsightAnalyzer(Analyzer):
                 if distance is not None
                 else 0.0
             )
-            git_score = round(
-                min(25.0, git_changes * 2 + recent_changes * 3), 2
+            git_score = (
+                round(min(25.0, git_changes * 2 + recent_changes * 3), 2)
+                if git_changes is not None and recent_changes is not None
+                else None
             )
             reading_priority_score = round(
                 size_score + dependency_score + entry_score, 2
             )
-            change_attention_score = round(
-                dependency_score + git_score, 2
+            change_attention_score = (
+                round(dependency_score + git_score, 2)
+                if git_score is not None else None
             )
             insights.module_scores.append(
                 ModuleScore(
@@ -116,7 +123,12 @@ class InsightAnalyzer(Analyzer):
                 )
 
         for score in insights.module_scores:
-            if score.git_changes and score.dependency_score:
+            if (
+                score.git_changes and score.dependency_score
+                and score.recent_changes is not None
+                and score.git_score is not None
+                and score.change_attention_score is not None
+            ):
                 insights.change_attention.append(
                     ChangeAttention(
                         score.node_id,

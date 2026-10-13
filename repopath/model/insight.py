@@ -15,14 +15,14 @@ class ModuleScore:
     incoming: int
     outgoing: int
     entry_distance: int | None
-    git_changes: int
-    recent_changes: int
+    git_changes: int | None
+    recent_changes: int | None
     size_score: float
     dependency_score: float
     entry_score: float
-    git_score: float
+    git_score: float | None
     reading_priority_score: float
-    change_attention_score: float
+    change_attention_score: float | None
 
 
 @dataclass(frozen=True)

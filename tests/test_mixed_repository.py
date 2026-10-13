@@ -24,7 +24,7 @@ def test_mixed_repository_report_contains_python_and_cpp_sections() -> (
     assert "## C++ 分析" in markdown
     assert payload["cpp"]["file_count"] == 3
     assert payload["python"]["function_count"] == 5
-    assert payload["schema_version"] == "0.4"
+    assert payload["schema_version"] == "0.5"
     assert payload["overview"]["dependency_nodes"] == 8
     assert payload["insights"]["reading_order"]
     assert "## 推荐阅读顺序" in markdown

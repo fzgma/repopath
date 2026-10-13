@@ -53,7 +53,15 @@ python -m pip install -r requirements.txt
 python run_streamlit.py
 ```
 
-支持 `quick`、`standard`、`deep` 三种分析模式。
+支持 `fast`、`standard`、`deep` 三种分析模式。
+
+| 模式 | 分析范围 |
+| --- | --- |
+| `fast` | 文件扫描、语言和目录统计 |
+| `standard` | 文件统计、Python/C++ 结构与局部依赖、Git 历史 |
+| `deep` | 全部分析，包括统一依赖图、阅读顺序、模块评分和变更关注 |
+
+`standard` 不运行统一依赖图和洞察分析。如需完整阅读导航，使用 `--profile deep`。
 
 ### GitHub
 
@@ -123,6 +131,15 @@ python -m repopath . --detail full -o report.md
 ```
 
 JSON 始终输出完整结构，适合脚本、CI/CD 和 Agent 集成。
+
+报告明确记录 Analyzer 状态：`not_run`（未运行）、`completed`（完成）、`failed`（失败）。
+JSON 的 `analysis.analyzers` 提供各分析器的状态、原因、警告和错误；Python、C++、Git、统一依赖图和洞察章节也提供 `status` 与 `reason`。
+Markdown 在对应章节显示状态与原因。未运行不等于分析后没有结果；上游分析失败时，下游会跳过并说明原因。
+
+JSON Schema 0.5 中，概览计数在对应分析未完成时为 `null`，包括文件/行数/语言、Python/C++ 入口和 `dependency_nodes`、`dependency_edges`、`cycle_count`；完成后才输出数量（包括零）。Markdown 和 UI 在对应位置显示未运行或失败，入口候选分别注明 Python 与 C++ 的状态。
+Git Analyzer 完成表示已检查 Git 可用性，历史是否可用还需查看 `git.available` 和 `git.error`。
+
+静态阅读推荐不依赖 Git 历史。`insights.change_attention_analysis` 单独提供变更关注的 `status` 与 `reason`：洞察未运行/失败时继承其状态；洞察完成但 Git 未运行、失败或历史不可用时为 `not_run`，并说明原因。此时 `change_attention` 为空，模块评分中的 `git_changes`、`recent_changes`、`scores.git` 和 `scores.change_attention_score` 为 `null`，Markdown/UI 显示“未计算”；静态阅读优先级与阅读路径仍可使用。
 
 ## 6. 限制
 
