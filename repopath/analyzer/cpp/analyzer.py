@@ -10,7 +10,6 @@ from ...model.result import AnalysisResult, AnalysisState, AnalyzerName
 from ...model.source import SourceDependency, SourceSymbol
 from ..base import Analyzer
 
-
 INCLUDE_PATTERN = re.compile(
     r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE
 )
@@ -43,6 +42,10 @@ class CppAnalyzer(Analyzer):
         self, context: AnalysisContext, state: AnalysisState
     ) -> AnalysisResult:
         """从 C++ 源文件和头文件中提取基础静态结构。"""
+        if context.options.cpp_backend == "libclang":
+            from .semantics import analyze_semantics
+
+            return analyze_semantics(context, state)
         files = [
             file
             for file in state.artifacts.files

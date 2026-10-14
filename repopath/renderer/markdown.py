@@ -2,7 +2,9 @@
 
 from ..model.file import FileRecord
 from ..model.report import RepositoryReport
+from ..model.repository import RepositorySourceType
 from ..model.result import AnalyzerName, AnalyzerStatus
+from .json import cpp_report_message, cpp_semantic_payload
 
 
 def markdown_cell(value: object) -> str:
@@ -23,6 +25,13 @@ def _file_sort_key(file: FileRecord) -> tuple[int, str]:
 def _markdown_cycle_member(node: str) -> str:
     """将循环成员格式化为 Markdown 嵌套列表项。"""
     return f"  - `{markdown_cell(node)}`"
+
+
+def _cpp_location_text(location: dict) -> str:
+    """将语义位置格式化为紧凑的文件、行和列。"""
+    if location["path"] is None:
+        return "无源码位置"
+    return f"{location['path']}:{location['line']}:{location['column']}"
 
 
 class MarkdownRenderer:
@@ -175,6 +184,7 @@ class MarkdownRenderer:
             lines.append("未检测到仓库内 Python 模块之间的直接依赖。")
 
         lines.extend(["", "## C++ 分析", ""])
+        lines.append(f"- 分析方式：`{cpp.backend}`（{cpp.analysis_level}）")
         if cpp.files:
             lines.extend(
                 [
@@ -252,6 +262,7 @@ class MarkdownRenderer:
         else:
             lines.append("当前没有检测到 C++ 源文件或头文件。")
 
+        self._append_cpp_semantics(lines, report)
         graph = report.dependencies
         limit = report.options.result_limit
         reading_limit = report.options.reading_limit
@@ -639,6 +650,7 @@ class MarkdownRenderer:
             lines.append("暂无 Python 核心模块候选。")
 
         self._append_entries(lines, report, limit=10)
+        self._append_cpp_semantics(lines, report, limit=5)
 
         lines.extend(["", "## 推荐阅读", ""])
         if insights.reading_order:
@@ -693,6 +705,112 @@ class MarkdownRenderer:
                     f"Churn {change.churn}，提交 {change.commits} 次"
                 )
         return self._with_status(lines, report)
+
+    @staticmethod
+    def _append_cpp_semantics(
+        lines: list[str], report: RepositoryReport, limit: int | None = None
+    ) -> None:
+        """保留语义分析的覆盖和诊断，包括失败或部分完成的结果。"""
+        if report.options.cpp_backend != "libclang" and report.cpp.backend != "libclang":
+            return
+        data = cpp_semantic_payload(report)
+        result = report.analyzer_result(AnalyzerName.CPP)
+        limit = report.options.result_limit if limit is None else limit
+        lines.extend([
+            "", "## C++ 语义分析", "",
+            f"- 请求方式：`{data['requested_backend']}`",
+            f"- 执行状态：`{result.status}`",
+        ])
+        if result.reason:
+            lines.append(f"- 原因：{markdown_cell(cpp_report_message(report, result.reason))}")
+        if result.status == AnalyzerStatus.NOT_RUN:
+            return
+        lines.extend([
+            f"- 实际方式：`{data['backend']}`（{data['analysis_level']}）",
+            f"- 语义结果：`{data['semantic_status']}`",
+        ])
+        if data["semantic_reason"]:
+            lines.append(f"- 语义说明：{markdown_cell(data['semantic_reason'])}")
+        if data["library_version"]:
+            lines.append(f"- Clang 版本：{markdown_cell(data['library_version'])}")
+        if data["compile_commands"]:
+            lines.append(f"- 编译配置：`{markdown_cell(data['compile_commands'])}`")
+        coverage = data["coverage"]
+        lines.extend([
+            (
+                "- 编译单元："
+                f"{coverage['total_translation_units']} 个，"
+                f"已解析 {coverage['parsed_translation_units']} 个，"
+                f"失败 {coverage['failed_translation_units']} 个"
+            ),
+            f"- 语义覆盖文件：{coverage['covered_files']} / {coverage['total_files']}",
+            "- 覆盖范围以选中的编译配置为准；未找到调用不代表代码未使用。",
+            "- 直接调用单独展示，不计入现有模块依赖评分。",
+        ])
+        if coverage["uncovered_files"]:
+            lines.append(
+                "- 未覆盖文件：" + "、".join(
+                    f"`{markdown_cell(path)}`"
+                    for path in coverage["uncovered_files"][:limit]
+                )
+            )
+        if data["translation_units"]:
+            lines.extend([
+                "", "### 编译单元", "",
+                "| 文件 | 状态 | 原因 |", "| --- | --- | --- |",
+            ])
+            for unit in data["translation_units"][:limit]:
+                lines.append(markdown_row(
+                    markdown_cell(unit["path"]), unit["status"],
+                    markdown_cell(unit["reason"] or ""),
+                ))
+        if data["semantic_symbols"]:
+            lines.extend([
+                "", "### 语义符号", "",
+                "| 符号 | 类型 | 声明 | 定义 |",
+                "| --- | --- | --- | --- |",
+            ])
+            for symbol in data["semantic_symbols"][:limit]:
+                lines.append(markdown_row(
+                    markdown_cell(symbol["qualified_name"]),
+                    markdown_cell(symbol["type_spelling"]),
+                    markdown_cell("、".join(
+                        _cpp_location_text(item) for item in symbol["declarations"]
+                    )),
+                    markdown_cell("、".join(
+                        _cpp_location_text(item) for item in symbol["definitions"]
+                    )),
+                ))
+        if data["direct_calls"]:
+            names = {
+                symbol["usr"]: symbol["qualified_name"]
+                for symbol in data["semantic_symbols"]
+            }
+            lines.extend([
+                "", "### 直接调用", "",
+                "| 调用方 | 目标 | 位置 |", "| --- | --- | --- |",
+            ])
+            for call in data["direct_calls"][:limit]:
+                lines.append(markdown_row(
+                    markdown_cell(names.get(call["caller_usr"], call["caller_usr"])),
+                    markdown_cell(names.get(call["callee_usr"], call["callee_usr"])),
+                    markdown_cell(_cpp_location_text(call["location"])),
+                ))
+        if data["diagnostics"]:
+            lines.extend([
+                "", "### 语义诊断", "",
+                "| 级别 | 位置 | 说明 |", "| --- | --- | --- |",
+            ])
+            for diagnostic in data["diagnostics"][:limit]:
+                lines.append(markdown_row(
+                    diagnostic["severity"],
+                    markdown_cell(_cpp_location_text(diagnostic)),
+                    markdown_cell(diagnostic["message"]),
+                ))
+        if any(len(data[key]) > limit for key in (
+            "semantic_symbols", "direct_calls", "translation_units", "diagnostics"
+        )) or len(coverage["uncovered_files"]) > limit:
+            lines.append("\n各列表已限量展示；完整证据见 JSON 报告。")
 
     @staticmethod
     def _append_entries(
@@ -781,7 +899,10 @@ class MarkdownRenderer:
                 if result.status != AnalyzerStatus.COMPLETED:
                     line = metric + "：" + labels[result.status]
             output.append(line)
-        return "\n".join(output) + "\n"
+        content = "\n".join(output) + "\n"
+        if report.source is not None and report.source.type == RepositorySourceType.GITHUB:
+            return cpp_report_message(report, content)
+        return content
 
     @staticmethod
     def _append_summary_messages(

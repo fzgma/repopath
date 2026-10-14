@@ -1,10 +1,133 @@
 """JSON 报告 Renderer。"""
 
 import json
+from pathlib import Path
+from typing import Any, overload
 
+from ..model.cpp import CppLocation
 from ..model.report import RepositoryReport
 from ..model.repository import RepositorySourceType
 from ..model.result import AnalyzerName
+
+
+@overload
+def cpp_report_path(report: RepositoryReport, path: Path) -> str: ...
+
+
+@overload
+def cpp_report_path(report: RepositoryReport, path: None) -> None: ...
+
+
+def cpp_report_path(report: RepositoryReport, path: Path | None) -> str | None:
+    """显示仓库相对位置，外部依赖只保留文件名。"""
+    if path is None:
+        return None
+    try:
+        return report.repository.relative_path(path)
+    except ValueError:
+        return f"[external]/{path.name}"
+
+
+@overload
+def cpp_report_message(report: RepositoryReport, message: str) -> str: ...
+
+
+@overload
+def cpp_report_message(report: RepositoryReport, message: None) -> None: ...
+
+
+def cpp_report_message(report: RepositoryReport, message: str | None) -> str | None:
+    """避免诊断文本暴露仓库快照的临时绝对路径。"""
+    if message is None:
+        return None
+    for root in (str(report.repository.root), report.repository.root.as_posix()):
+        message = message.replace(root, ".")
+    return message
+
+
+def _cpp_location(report: RepositoryReport, location: CppLocation) -> dict:
+    """序列化符号或调用的源码位置。"""
+    return {
+        "path": cpp_report_path(report, location.path),
+        "line": location.line,
+        "column": location.column,
+    }
+
+
+def cpp_semantic_payload(report: RepositoryReport) -> dict:
+    """生成两种报告共用的 C++ 后端、覆盖和语义证据。"""
+    cpp = report.cpp
+    coverage = cpp.coverage
+    diagnostics = []
+    for diagnostic in cpp.diagnostics:
+        message = cpp_report_message(report, diagnostic.message)
+        if diagnostic.path is not None:
+            safe_path = cpp_report_path(report, diagnostic.path)
+            for path_text in (str(diagnostic.path), diagnostic.path.as_posix()):
+                message = message.replace(path_text, safe_path)
+        diagnostics.append({
+            "severity": diagnostic.severity,
+            "message": message,
+            "translation_unit": cpp_report_path(report, diagnostic.translation_unit),
+            "path": cpp_report_path(report, diagnostic.path),
+            "line": diagnostic.line,
+            "column": diagnostic.column,
+        })
+    return {
+        "requested_backend": report.options.cpp_backend,
+        "backend": cpp.backend,
+        "analysis_level": cpp.analysis_level,
+        "semantic_status": cpp.semantic_status,
+        "semantic_reason": cpp_report_message(report, cpp.semantic_reason),
+        "library_version": cpp.library_version,
+        "compile_commands": cpp_report_path(report, cpp.compile_commands),
+        "coverage": {
+            "total_files": coverage.total_files,
+            "covered_files": coverage.covered_files,
+            "total_translation_units": coverage.total_translation_units,
+            "parsed_translation_units": coverage.parsed_translation_units,
+            "failed_translation_units": coverage.failed_translation_units,
+            "uncovered_files": [
+                cpp_report_path(report, path) for path in coverage.uncovered_files
+            ],
+        },
+        "semantic_symbols": [
+            {
+                "usr": symbol.usr,
+                "name": symbol.name,
+                "qualified_name": symbol.qualified_name,
+                "kind": symbol.kind,
+                "type_spelling": symbol.type_spelling,
+                "declarations": [
+                    _cpp_location(report, item) for item in symbol.declarations
+                ],
+                "definitions": [
+                    _cpp_location(report, item) for item in symbol.definitions
+                ],
+            }
+            for _, symbol in sorted(cpp.symbols.items())
+        ],
+        "direct_calls": [
+            {
+                "caller_usr": call.caller_usr,
+                "callee_usr": call.callee_usr,
+                "location": _cpp_location(report, call.location),
+                "translation_units": [
+                    cpp_report_path(report, path) for path in call.translation_units
+                ],
+            }
+            for call in cpp.calls
+        ],
+        "translation_units": [
+            {
+                "path": cpp_report_path(report, unit.path),
+                "status": unit.status,
+                "reason": cpp_report_message(report, unit.reason),
+            }
+            for unit in cpp.translation_units
+        ],
+        "diagnostics": diagnostics,
+    }
 
 
 class JsonRenderer:
@@ -17,7 +140,7 @@ class JsonRenderer:
             report.source is not None
             and report.source.type is RepositorySourceType.GITHUB
         )
-        payload: dict[str, object] = {
+        payload: dict[str, Any] = {
             "schema_version": report.schema_version,
             "tool_version": report.tool_version,
             "generated_at": report.generated_at,
@@ -347,6 +470,7 @@ class JsonRenderer:
             }
             for name, result in report.analyzer_results.items()
         }
+        payload["cpp"].update(cpp_semantic_payload(report))
         for name in (AnalyzerName.PYTHON, AnalyzerName.CPP, AnalyzerName.GIT,
                      AnalyzerName.DEPENDENCIES, AnalyzerName.INSIGHTS):
             result = report.analyzer_result(name)
@@ -368,4 +492,9 @@ class JsonRenderer:
             "status": attention.status,
             "reason": attention.reason,
         }
-        return json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+        content = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
+        if is_github:
+            for root in (str(report.repository.root), report.repository.root.as_posix()):
+                escaped = json.dumps(root, ensure_ascii=False)[1:-1]
+                content = content.replace(escaped, ".")
+        return content

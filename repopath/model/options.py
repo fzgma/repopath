@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 
 VALID_PROFILES = {"fast", "standard", "deep", "custom"}
 VALID_GIT_PERIODS = {"all", "30", "90"}
+VALID_CPP_BACKENDS = {"basic", "libclang"}
 
 
 @dataclass(frozen=True)
@@ -35,6 +36,8 @@ class AnalysisOptions:
     profile: str = "deep"
     python_enabled: bool = True
     cpp_enabled: bool = True
+    cpp_backend: str = "basic"
+    cpp_compile_commands: str | None = None
     git_enabled: bool = True
     dependencies_enabled: bool = True
     insights_enabled: bool = True
@@ -89,6 +92,13 @@ class AnalysisOptions:
             raise ValueError(f"未知分析模式：{self.profile}")
         if self.git_period not in VALID_GIT_PERIODS:
             raise ValueError("Git 时间范围必须是 all、30 或 90")
+        if self.cpp_backend not in VALID_CPP_BACKENDS:
+            raise ValueError("C++ 分析方式必须是 basic 或 libclang")
+        if self.cpp_compile_commands is not None and (
+            not isinstance(self.cpp_compile_commands, str)
+            or not self.cpp_compile_commands.strip()
+        ):
+            raise ValueError("C++ 编译配置路径必须是非空字符串")
         if self.max_file_size is not None and self.max_file_size <= 0:
             raise ValueError("最大文件大小必须大于 0")
         if self.result_limit <= 0:

@@ -1,0 +1,13 @@
+# libclang is loaded by ctypes, so it must be collected as a native library.
+# https://nuitka.net/user-documentation/nuitka-package-config.html#dlls
+# Windows CRT is collected by the additional generated configuration:
+# python scripts/prepare_cpp_package.py [--runtime-dir <official x64 redist>]
+# --user-package-configuration-file=build/cpp-runtime.nuitka-package.config.yml
+- module-name: 'clang.cindex'
+  dlls:
+    - from_filenames:
+        relative_path: 'native'
+        prefixes:
+          - 'libclang'
+      dest_path: 'clang/native'
+      when: 'standalone and (win32 or linux)'
