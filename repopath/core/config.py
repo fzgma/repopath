@@ -24,11 +24,6 @@ exclude = []
 # dependencies = false
 # insights = false
 
-[cpp]
-backend = "basic"
-# libclang 模式需要编译数据库，路径相对仓库根目录：
-# compile_commands = "build/compile_commands.json"
-
 [git]
 period = "all"
 
@@ -92,7 +87,6 @@ def load_analysis_options(
 
     scan = _section(payload, "scan")
     analyzers = _section(payload, "analyzers")
-    cpp = _section(payload, "cpp")
     git = _section(payload, "git")
     github = _section(payload, "github")
     report = _section(payload, "report")
@@ -123,8 +117,6 @@ def load_analysis_options(
             excluded_patterns=_optional_strings(scan, "exclude"),
             python_enabled=python_enabled,
             cpp_enabled=cpp_enabled,
-            cpp_backend=_optional_string(cpp, "backend"),
-            cpp_compile_commands=_optional_string(cpp, "compile_commands"),
             git_enabled=_optional_bool(analyzers, "git"),
             dependencies_enabled=dependencies_enabled,
             insights_enabled=insights_enabled,
@@ -160,16 +152,6 @@ def _section(
     if not isinstance(value, dict):
         raise AnalysisConfigError(f"配置项 [{name}] 必须是 TOML 表")
     return cast(dict[str, object], value)
-
-
-def _optional_string(section: dict[str, object], key: str) -> str | None:
-    """读取可选字符串配置，避免将无效类型隐式转换为路径。"""
-    if key not in section:
-        return None
-    value = section[key]
-    if not isinstance(value, str):
-        raise TypeError(f"{key} 必须是字符串")
-    return value
 
 
 def _optional_bool(section: dict[str, object], key: str) -> bool | None:

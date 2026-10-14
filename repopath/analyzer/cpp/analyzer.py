@@ -1,51 +1,40 @@
 """C++ 基础静态分析器。"""
 
 import re
-from pathlib import Path
 
 from ...core.context import AnalysisContext
-from ...model.cpp import CppAnalysis, CppFileAnalysis
+from ...model.cpp import CppAnalysis, CppEntryPoint, CppFileAnalysis
 from ...model.language import Language
 from ...model.result import AnalysisResult, AnalysisState, AnalyzerName
 from ...model.source import SourceDependency, SourceSymbol
 from ..base import Analyzer
+from .includes import IncludeResolver, scan_source
 
-INCLUDE_PATTERN = re.compile(
-    r'^\s*#\s*include\s*[<"]([^>"]+)[>"]', re.MULTILINE
-)
 TYPE_PATTERN = re.compile(
-    r"^\s*(?:class|struct)\s+([A-Za-z_]\w*)", re.MULTILINE
+    r"^[ \t\f\v]*(?:class|struct)\s+([A-Za-z_]\w*)", re.MULTILINE
 )
 NAMESPACE_PATTERN = re.compile(
-    r"^\s*namespace\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)", re.MULTILINE
+    r"^[ \t\f\v]*namespace\s+([A-Za-z_]\w*(?:::[A-Za-z_]\w*)*)",
+    re.MULTILINE,
 )
 FUNCTION_PATTERN = re.compile(
-    r"^\s*(?!if\b|for\b|while\b|switch\b|catch\b)"
+    r"^[ \t\f\v]*(?!if\b|for\b|while\b|switch\b|catch\b)"
     r"(?:[A-Za-z_~][\w:<>,~*&]*\s+)+"
     r"((?:[A-Za-z_]\w*::)*[A-Za-z_]\w*)\s*\([^;{}]*\)\s*"
-    r"(?:const\s*)?(?:noexcept\s*)?(?:\{|;|:)",
+    r"(?:const\s*)?(?:noexcept\s*)?(?P<ending>\{|;|:)",
     re.MULTILINE,
 )
 
 
-def line_number(source: str, offset: int) -> int:
-    """将正则匹配位置转换为一开始的行号。"""
-    return source.count("\n", 0, offset) + 1
-
-
 class CppAnalyzer(Analyzer):
-    """分析 C++ include、函数、类、结构体、命名空间和 main 入口。"""
+    """直接读取 C++ 源码，识别 include、符号和入口候选。"""
 
     name = AnalyzerName.CPP
 
     def analyze(
         self, context: AnalysisContext, state: AnalysisState
     ) -> AnalysisResult:
-        """从 C++ 源文件和头文件中提取基础静态结构。"""
-        if context.options.cpp_backend == "libclang":
-            from .semantics import analyze_semantics
-
-            return analyze_semantics(context, state)
+        """从扫描范围内的文件构建阅读关系，不展开宏或执行编译。"""
         files = [
             file
             for file in state.artifacts.files
@@ -53,11 +42,9 @@ class CppAnalyzer(Analyzer):
         ]
         analysis = CppAnalysis()
         warnings: list[str] = []
-        local_paths = {
-            context.repository.relative_path(file.path): file.path
-            for file in files
-        }
-        local_names = {file.path.name: file.path for file in files}
+        resolver = IncludeResolver(
+            context.repository.root, [file.path for file in files]
+        )
 
         for file in files:
             context.cancellation.raise_if_cancelled()
@@ -70,52 +57,55 @@ class CppAnalyzer(Analyzer):
                 continue
             item = CppFileAnalysis(path=file.path)
             source_name = context.repository.relative_path(file.path)
-            item.includes = INCLUDE_PATTERN.findall(source)
+            parsed = scan_source(source)
+            item.include_details = parsed.includes
+            item.includes = [include.name for include in parsed.includes]
             analysis.include_counts.update(item.includes)
-            item.functions = [
-                SourceSymbol(
-                    match.group(1).split("::")[-1],
-                    "function",
-                    file.path,
-                    line_number(source, match.start()),
+            for match in FUNCTION_PATTERN.finditer(parsed.code):
+                name = match.group(1)
+                line, conditions = parsed.location(match.start(1))
+                item.functions.append(
+                    SourceSymbol(
+                        name.split("::")[-1], "function", file.path, line
+                    )
                 )
-                for match in FUNCTION_PATTERN.finditer(source)
-            ]
+                if (
+                    name in {"main", "wmain", "WinMain", "wWinMain"}
+                    and match.group("ending") == "{"
+                ):
+                    analysis.entry_points.append(
+                        CppEntryPoint(
+                            name, "function", file.path, line, conditions
+                        )
+                    )
             item.types = [
                 SourceSymbol(
                     match.group(1),
                     "class_or_struct",
                     file.path,
-                    line_number(source, match.start()),
+                    parsed.location(match.start(1))[0],
                 )
-                for match in TYPE_PATTERN.finditer(source)
+                for match in TYPE_PATTERN.finditer(parsed.code)
             ]
             item.namespaces = [
                 SourceSymbol(
                     match.group(1),
                     "namespace",
                     file.path,
-                    line_number(source, match.start()),
+                    parsed.location(match.start(1))[0],
                 )
-                for match in NAMESPACE_PATTERN.finditer(source)
+                for match in NAMESPACE_PATTERN.finditer(parsed.code)
             ]
-            analysis.entry_points.extend(
-                symbol
-                for symbol in item.functions
-                if symbol.name == "main"
-            )
             analysis.files[file.path] = item
 
-            for include in item.includes:
-                target_path = local_paths.get(
-                    include
-                ) or local_names.get(Path(include).name)
-                if target_path:
+            for include in item.include_details:
+                resolver.resolve(file.path, include)
+                if include.target is not None:
                     analysis.dependencies.append(
                         SourceDependency(
                             source_name,
                             context.repository.relative_path(
-                                target_path
+                                include.target
                             ),
                             "include",
                         )

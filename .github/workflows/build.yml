@@ -17,7 +17,7 @@ jobs:
       label: ${{ steps.version.outputs.label }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Resolve version
         id: version
@@ -55,7 +55,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -92,30 +92,10 @@ jobs:
           --output-filename=repopath
           repopath.py
 
-      - name: Smoke test Windows executable
-        if: matrix.platform == 'windows-x64'
-        shell: pwsh
-        env:
-          PYTHONUTF8: "1"
-        run: |
-          .\build\repopath.exe --help
-          $smokeRoot = Join-Path $env:RUNNER_TEMP "repopath-smoke"
-          Copy-Item tests/fixtures/mixed_repo $smokeRoot -Recurse -Force
-          .\build\repopath.exe $smokeRoot -o "$smokeRoot/report.md"
-          if (-not (Test-Path "$smokeRoot/report.md")) {
-            throw "exe 未生成分析报告"
-          }
-
-      - name: Smoke test Linux executable
-        if: matrix.platform == 'linux-x64'
-        shell: bash
-        run: |
-          ./build/repopath --help
-          smoke_root="$RUNNER_TEMP/repopath-smoke"
-          rm -rf "$smoke_root"
-          cp -R tests/fixtures/mixed_repo "$smoke_root"
-          ./build/repopath "$smoke_root" -o "$smoke_root/report.md"
-          test -f "$smoke_root/report.md"
+      - name: Check relocated executable and C++ analysis without build tools
+        run: >-
+          python scripts/check_cpp_analysis.py
+          --artifact build/${{ matrix.executable }}
 
       - name: Create Windows checksum
         if: matrix.platform == 'windows-x64'
@@ -130,7 +110,7 @@ jobs:
         run: sha256sum build/repopath > build/repopath.sha256
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: repopath-${{ matrix.platform }}-${{ needs.resolve-version.outputs.label }}
           path: |
@@ -146,7 +126,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Download build artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: release
 

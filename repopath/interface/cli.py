@@ -16,7 +16,6 @@ from ..core.config import (
 )
 from ..model.options import AnalysisOptions
 from ..model.repository import Repository, RepositorySource
-from ..model.result import AnalyzerName
 from ..provider.github import GitHubRepositoryRef
 from ..renderer.json import JsonRenderer
 from ..renderer.markdown import MarkdownRenderer
@@ -138,16 +137,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="关闭 Python Analyzer",
     )
     parser.add_argument(
-        "--cpp-backend",
-        choices=("basic", "libclang"),
-        help="C++ 分析方式：基础分析或需要编译配置的 libclang 语义分析",
-    )
-    parser.add_argument(
-        "--compile-commands",
-        dest="cpp_compile_commands",
-        help="C++ 编译数据库路径，相对仓库根目录；默认查找根目录或 build 目录",
-    )
-    parser.add_argument(
         "--no-cpp",
         dest="cpp_enabled",
         action="store_false",
@@ -233,16 +222,6 @@ def main(argv: list[str] | None = None) -> int:
     output.write_text(content, encoding="utf-8")
     print(f"分析完成：扫描 {len(report.files)} 个文件")
     print(f"分析模式：{options.profile}；报告已写入 {output}")
-    if options.cpp_enabled and options.cpp_backend == "libclang":
-        result = report.analyzer_result(AnalyzerName.CPP)
-        if not result.successful:
-            print(
-                f"C++ 语义分析未完成：{result.reason or '没有执行记录'}",
-                file=sys.stderr,
-            )
-            return 1
-        if report.cpp.semantic_status == "partial":
-            print(f"提示：C++ 语义分析仅覆盖部分内容：{report.cpp.semantic_reason}")
     if not options.dependencies_enabled or not options.git_enabled:
         print(
             "提示：当前模式未启用完整导航；需要依赖、阅读路线和 Git "
@@ -349,8 +328,6 @@ def _resolve_options(
             include_file_list=args.include_file_list,
             python_enabled=python_enabled,
             cpp_enabled=cpp_enabled,
-            cpp_backend=args.cpp_backend,
-            cpp_compile_commands=args.cpp_compile_commands,
             git_enabled=args.git_enabled,
             dependencies_enabled=dependencies_enabled,
             insights_enabled=insights_enabled,
