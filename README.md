@@ -20,6 +20,7 @@ Release 中的版本为纯CLI版。如需使用UI，请先clone项目或点击�
 * **C++**：源码与头文件结构、include 解析、函数、类/结构体、命名空间和入口候选
 * **依赖分析**：统一依赖图、循环依赖、孤立模块
 * **阅读导航**：阅读优先级、推荐阅读顺序、入口路径
+* **试验性阅读指南**：按文档、接口和使用证据提供片段、关联与分析缺口，CLI 与 UI 均可开启
 * **变更关注**：结合依赖关系和 Git 活跃度定位重点模块
 * **Git 分析**：提交趋势、churn、热点文件、共同修改和贡献者
 * **GitHub**：支持公开仓库、分支、标签和提交 SHA
@@ -59,9 +60,30 @@ python run_streamlit.py
 | --- | --- |
 | `fast` | 文件扫描、语言和目录统计 |
 | `standard` | 文件统计、Python/C++ 结构与局部依赖、Git 历史 |
-| `deep` | 全部分析，包括统一依赖图、阅读顺序、模块评分和变更关注 |
+| `deep` | 全部常规分析，包括统一依赖图、阅读顺序、模块评分和变更关注；试验性阅读指南单独开启 |
 
 `standard` 不运行统一依赖图和洞察分析。如需完整阅读导航，使用 `--profile deep`。
+
+### 试验性阅读指南
+
+阅读指南单独开启，不要求依赖图或 Git 历史成功。CLI 源码运行与打包程序使用同一个选项：
+
+```powershell
+python -m repopath . --reading-guide -o guide.md
+repopath.exe . --reading-guide --format json -o guide.json
+```
+
+Streamlit 中在“高级配置”勾选“试验性阅读指南”，分析后进入“阅读指南（试验）”视图。两端使用相同的选项、分析结果和报告内容，可查看主题、阅读问题、片段预览、来源依据、相关位置和缺口。UI 也能下载同一份 JSON / Markdown 报告。
+
+默认摘要只列位置、简短理由和依据类型。CLI 使用 `--detail full` 查看证据与片段；UI 展开“依据与片段”或“分析说明”，下载 Markdown 时也可选择“摘要 / 完整”。同一步中的相同片段只展示一次，JSON 保留原有记录。
+
+指南先提供有证据的说明、公开用法、定义和引用位置、关联示例；文档陈述、直接观察和候选关系分别标明。各语言复用同一选择机制，源码深度取决于已启用的语言分析能力；无法确认主次时并列展示，不按文件大小、修改次数或引用数量断言业务重点。片段只是有界预览，仍须核对原文。
+
+也可在 `.repopath.toml` 中设置 `[analyzers]` 下的 `reading = true`。CLI 的 `--no-reading-guide` 可覆盖配置关闭指南；切换分析模式不会取消显式开启的指南。`fast` 模式只提供文档和清单等证据，Python/C++ 结构增强仍取决于语言开关。
+
+当前为通用原型，默认关闭并保留原有导读。工程测试检查来源、失败隔离和两端一致性；未完成独立陌生读者评估前，不宣称已经证明业务理解收益。
+
+指南的证据采集目前最多读取 512 个文件、合计 8 MiB，单文件上限 256 KiB；超限会记录缺口。每个文件最多保留 64 个候选，全局最多 2000 个，再按 `reading_limit` 选出阅读步骤。JSON 保存最终计划及已保留证据，不包含预算外内容或未入选候选的完整列表。
 
 ### GitHub
 
@@ -150,7 +172,9 @@ C++ 报告提供基础符号与入口候选。JSON 的 `cpp.include_details` 保
 JSON 的 `analysis.analyzers` 提供各分析器的状态、原因、警告和错误；Python、C++、Git、统一依赖图和洞察章节也提供 `status` 与 `reason`。
 Markdown 在对应章节显示状态与原因。未运行不等于分析后没有结果；上游分析失败时，下游会跳过并说明原因。
 
-JSON Schema 0.5 中，概览计数在对应分析未完成时为 `null`，包括文件/行数/语言、Python/C++ 入口和 `dependency_nodes`、`dependency_edges`、`cycle_count`；完成后才输出数量（包括零）。Markdown 和 UI 在对应位置显示未运行或失败，入口候选分别注明 Python 与 C++ 的状态。
+JSON Schema 0.6 保留旧字段含义，新增 `reading_guide`：阅读步骤、证据与相关位置、能力范围、缺口和截断状态；`analysis.analyzers.reading` 记录独立执行状态。完成但没有步骤表示现有证据不足，不等于项目没有值得阅读的内容。
+
+概览计数在对应分析未完成时为 `null`，包括文件/行数/语言、Python/C++ 入口和 `dependency_nodes`、`dependency_edges`、`cycle_count`；完成后才输出数量（包括零）。Markdown 和 UI 在对应位置显示未运行或失败，入口候选分别注明 Python 与 C++ 的状态。
 Git Analyzer 完成表示已检查 Git 可用性，历史是否可用还需查看 `git.available` 和 `git.error`。
 
 静态阅读推荐不依赖 Git 历史。`insights.change_attention_analysis` 单独提供变更关注的 `status` 与 `reason`：洞察未运行/失败时继承其状态；洞察完成但 Git 未运行、失败或历史不可用时为 `not_run`，并说明原因。此时 `change_attention` 为空，模块评分中的 `git_changes`、`recent_changes`、`scores.git` 和 `scores.change_attention_score` 为 `null`，Markdown/UI 显示“未计算”；静态阅读优先级与阅读路径仍可使用。
@@ -164,6 +188,12 @@ Git Analyzer 完成表示已检查 Git 可用性，历史是否可用还需查�
 * GitHub 快照不包含 `.git`，因此无法分析远程 Git 历史。
 * 阅读优先级和变更关注度仅用于辅助导航，不代表代码质量或缺陷概率。
 
-## 7. 开源协议
+## 7. 开发与验收
+
+CLI（包括打包程序）与 Streamlit UI 共用核心分析和报告模型。新增分析能力、开关、来源依据和失败状态须同时在两端提供；显示方式可以不同，功能不能只在一端可用。确有特殊例外时须先经维护者批准。
+
+CI 在 Windows/Linux、Python 3.11–3.14 上运行测试，其中包含真实 Streamlit 页面与 CLI 报告的一致性检查。发行流程还会搬移可执行文件，在没有构建工具和目标依赖的环境中检查 C++ 分析与阅读指南。开发回归样例用于检查机制，不替代按项目家族隔离的未见仓库和独立读者验收。
+
+## 8. 开源协议
 
 [Apache License 2.0](LICENSE)

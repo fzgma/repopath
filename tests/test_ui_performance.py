@@ -47,3 +47,24 @@ def test_cached_report_text_renders_once_per_job() -> None:
 
     assert first == second == "报告文本"
     assert calls == 1
+
+
+def test_cached_report_text_keeps_detail_formats_separate() -> None:
+    """同一任务切换摘要、完整和 JSON 时不串内容，仅淘汰旧任务。"""
+    streamlit = _StreamlitStub()
+    report = cast(RepositoryReport, object())
+    calls: list[str] = []
+
+    def render_format(format_name: str, job: str = "job-1") -> str:
+        def render(_: RepositoryReport) -> str:
+            calls.append(format_name)
+            return f"{job}:{format_name}"
+
+        return _cached_report_text(report, streamlit, format_name, render, job)
+
+    for _ in range(2):
+        for format_name in ("markdown-summary", "markdown-full", "json"):
+            assert render_format(format_name) == f"job-1:{format_name}"
+    assert calls == ["markdown-summary", "markdown-full", "json"]
+    assert render_format("markdown-summary", "job-2") == "job-2:markdown-summary"
+    assert list(streamlit.session_state) == ["_repopath_report_job-2_markdown-summary"]

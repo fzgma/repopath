@@ -21,3 +21,5 @@ jobs:
       - run: python -m pytest
       - name: Check C++ source analysis without site-packages or build tools
         run: python scripts/check_cpp_analysis.py
+      - name: Check reading guide without site-packages or build tools
+        run: python scripts/check_reading_guide.py

@@ -9,6 +9,7 @@ from .file import FileRecord
 from .git import GitSummary
 from .insight import RepositoryInsights
 from .python import PythonAnalysis
+from .reading import ReadingGuide
 from .statistics import RepositoryStats
 
 
@@ -22,6 +23,7 @@ class AnalyzerName(StrEnum):
     GIT = "git"
     DEPENDENCIES = "dependencies"
     INSIGHTS = "insights"
+    READING = "reading"
 
 
 class AnalysisStatus(StrEnum):
@@ -62,6 +64,7 @@ class AnalysisArtifacts:
     insights: RepositoryInsights = field(
         default_factory=RepositoryInsights
     )
+    reading_guide: ReadingGuide = field(default_factory=ReadingGuide)
 
 
 @dataclass

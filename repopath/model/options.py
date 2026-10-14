@@ -49,6 +49,7 @@ class AnalysisOptions:
     github_file_limit: int = 10_000
     github_content_max_bytes: int = 100 * 1024 * 1024
     github_file_max_bytes: int = 10 * 1024 * 1024
+    reading_enabled: bool = False
 
     @classmethod
     def for_profile(cls, profile: str) -> "AnalysisOptions":
@@ -123,5 +124,6 @@ class AnalysisOptions:
             "git": self.git_enabled,
             "dependencies": self.dependencies_enabled,
             "insights": self.insights_enabled,
+            "reading": self.reading_enabled,
         }
         return switches.get(name, True)

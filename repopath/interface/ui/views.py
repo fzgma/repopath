@@ -4,10 +4,12 @@ import json
 from collections.abc import Callable, Iterable, Sequence
 from heapq import nsmallest
 from itertools import islice
+from math import ceil
 from typing import Any, TypeAlias, TypeVar
 
 from ...model.dependency import DependencyEdge
 from ...model.git import FileChangeStats
+from ...model.reading import ReadingLocation, ReadingStep
 from ...model.report import RepositoryReport
 from ...model.result import (
     AnalysisAvailability,
@@ -16,6 +18,17 @@ from ...model.result import (
 )
 from ...renderer.json import JsonRenderer
 from ...renderer.markdown import MarkdownRenderer
+from ...renderer.reading import (
+    CONFIDENCE_LABELS,
+    EVIDENCE_LABELS,
+    GAP_LABELS,
+    KIND_LABELS,
+    READING_BOUNDARY,
+    format_location,
+    reading_detail_limit,
+    reading_state,
+    unique_preview_locations,
+)
 from .state import AnalysisSnapshot, UiRunState
 
 StreamlitApi: TypeAlias = Any
@@ -168,6 +181,7 @@ def render_report(
         [
             "概览",
             "推荐阅读",
+            "阅读指南（试验）",
             "依赖关系",
             "Python",
             "C++",
@@ -183,6 +197,8 @@ def render_report(
             _render_overview(report, st)
         case "推荐阅读":
             _render_reading(report, st)
+        case "阅读指南（试验）":
+            _render_reading_guide(report, st)
         case "依赖关系":
             _render_dependencies(report, st)
         case "Python":
@@ -222,7 +238,7 @@ def _render_analysis_scope_hint(
     hints: list[str] = []
     if not options.dependencies_enabled:
         hints.append(
-            "依赖分析未启用，依赖关系、推荐阅读和变更关注模块不会生成。"
+            "依赖分析未启用，依赖关系、基于依赖的推荐阅读和变更关注模块不会生成。"
         )
     if not options.git_enabled:
         hints.append("Git 分析未启用，Git 变更热点不会生成。")
@@ -232,7 +248,10 @@ def _render_analysis_scope_hint(
         for hint in hints:
             st.warning(hint)
         if options.profile != "deep":
-            st.info("切换到“深度”模式后重新分析，可生成完整导航结果。")
+            st.info(
+                "切换到“深度”模式后重新分析，可生成依赖与统计推荐结果。"
+                "试验性阅读指南由独立开关控制。"
+            )
 
 
 def _render_overview(
@@ -361,6 +380,144 @@ def _render_overview(
                 horizontal=True,
                 color="#3A7D44",
             )
+
+
+def _render_reading_guide(
+    report: RepositoryReport, st: StreamlitApi
+) -> None:
+    """展示共用报告中的阅读证据，不再访问本地或远程仓库文件。"""
+    st.subheader("阅读指南（试验）")
+    result = report.analyzer_result(AnalyzerName.READING)
+    if not result.successful:
+        _render_analyzer_status(report, AnalyzerName.READING, st)
+    if result.status == AnalyzerStatus.NOT_RUN:
+        return
+    guide = report.reading_guide
+    state = reading_state(report)
+    limits = []
+    if guide.gaps:
+        limits.append(f"缺口 {len(guide.gaps)} 项")
+    if guide.truncated:
+        limits.append("内容已截断")
+    if limits:
+        state += "（" + "；".join(limits) + "）"
+    if not result.successful or guide.gaps or guide.truncated:
+        st.warning(state)
+    else:
+        st.info(state)
+    detail_limit = reading_detail_limit(report)
+    for messages, render in (
+        (result.errors, st.error), (result.warnings, st.warning)
+    ):
+        for message in messages[:detail_limit]:
+            render(message)
+        _reading_limit_hint(st, len(messages), detail_limit)
+    with st.expander("分析说明", expanded=False):
+        st.caption(READING_BOUNDARY)
+        metrics = st.columns(3)
+        metrics[0].metric("阅读步骤", len(guide.steps))
+        metrics[1].metric("候选片段", guide.candidate_count)
+        metrics[2].metric("扫描文件", guide.scanned_files)
+        if guide.capabilities:
+            st.caption("本次能力范围")
+            for capability in guide.capabilities[:detail_limit]:
+                st.text(capability)
+            _reading_limit_hint(st, len(guide.capabilities), detail_limit)
+        if guide.gaps:
+            st.caption("缺口与限制")
+            for gap in guide.gaps[:detail_limit]:
+                st.text(
+                    f"{GAP_LABELS.get(gap.kind, gap.kind)}：{gap.message}"
+                    + (f"（{gap.path}）" if gap.path else "")
+                )
+            _reading_limit_hint(st, len(guide.gaps), detail_limit)
+        st.caption("已保留的计划与证据可在“报告”视图下载。")
+    if not guide.steps:
+        return
+    topics = list(dict.fromkeys(step.topic for step in guide.steps))
+    topic = st.selectbox(
+        "阅读主题", ["全部", *topics], key="reading_guide_topic"
+    )
+    steps = [
+        step
+        for step in guide.steps
+        if topic == "全部" or step.topic == topic
+    ]
+    page_size = min(report.options.reading_limit, 50)
+    pages = ceil(len(steps) / page_size)
+    page = (
+        int(
+            st.number_input(
+                "阅读指南页码",
+                min_value=1,
+                max_value=pages,
+                value=1,
+                step=1,
+                key=f"reading-guide-page:{topic}:{pages}",
+            )
+        )
+        if pages > 1
+        else 1
+    )
+    start = (page - 1) * page_size
+    st.caption(
+        f"当前 {len(steps)} / 全部 {len(guide.steps)} 项 · 第 {page} / {pages} 页"
+    )
+    for index, step in enumerate(
+        steps[start : start + page_size], start=start + 1
+    ):
+        confidence = CONFIDENCE_LABELS.get(step.confidence, step.confidence)
+        kind = KIND_LABELS.get(step.kind, step.kind)
+        st.text(
+            f"{index}. {format_location(step.location)}\n"
+            f"{step.summary}（{kind} · {confidence}）"
+        )
+        with st.expander(f"依据与片段 · {index}", expanded=False):
+            _render_reading_step(step, st, detail_limit)
+
+
+def _render_reading_step(
+    step: ReadingStep, st: StreamlitApi, detail_limit: int
+) -> None:
+    """显示片段、依据和候选关联，保留每项事实的来源。"""
+    confidence = CONFIDENCE_LABELS.get(step.confidence, step.confidence)
+    st.text(f"{step.question}\n主题：{step.topic}")
+    st.text(f"证据状态：{confidence}（{step.confidence}）")
+    if step.evidence:
+        st.caption("依据")
+        for evidence in step.evidence[:detail_limit]:
+            st.text(
+                f"{EVIDENCE_LABELS.get(evidence.kind, evidence.kind)}："
+                f"{evidence.description}（{format_location(evidence.location)}）"
+            )
+        _reading_limit_hint(st, len(step.evidence), detail_limit)
+    if step.related:
+        st.caption("相关位置（不代表已确认的调用或执行顺序）")
+        for related in step.related[:detail_limit]:
+            st.text(format_location(related))
+        _reading_limit_hint(st, len(step.related), detail_limit)
+    for location in unique_preview_locations(step, detail_limit):
+        _render_reading_location(location, st, "片段")
+
+
+def _render_reading_location(
+    location: ReadingLocation, st: StreamlitApi, label: str
+) -> None:
+    """展示报告保存的片段；来源路径仅作为文本而非网页链接。"""
+    st.text(f"{label}：{format_location(location)}")
+    if location.excerpt:
+        st.code(location.excerpt, language=None)
+
+
+def _reading_limit_hint(
+    st: StreamlitApi, total: int, limit: int
+) -> None:
+    """对受页面上限裁剪的详情明确提示完整 JSON 下载位置。"""
+    if total > limit:
+        st.caption(
+            f"本列表显示 {limit} / {total} 条；"
+            "本列表的全部条目可在“报告”视图下载 JSON。"
+        )
 
 
 def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
@@ -810,6 +967,7 @@ def _render_cpp(report: RepositoryReport, st: StreamlitApi) -> None:
         )
     ]
     st.dataframe(rows, width="stretch", hide_index=True)
+    _render_cpp_evidence(report, st)
     with st.expander("C++ 符号"):
         symbols: list[Row] = list(
             islice(
@@ -835,6 +993,76 @@ def _render_cpp(report: RepositoryReport, st: StreamlitApi) -> None:
             width="stretch",
             hide_index=True,
         )
+
+
+def _render_cpp_evidence(
+    report: RepositoryReport, st: StreamlitApi
+) -> None:
+    """展示 CLI 同样保留的 include 路径证据和条件入口候选。"""
+    cpp = report.cpp
+    limit = report.options.result_limit
+    st.subheader("C++ Include 路径匹配")
+    st.caption(
+        "仅匹配仓库内源码路径，不编译、不展开宏；条件不求值。"
+        "匹配结果不保证实际构建采用该文件，多个候选不会猜成依赖。"
+    )
+    rows: list[Row] = [
+        {
+            "来源": report.repository.relative_path(path),
+            "行号": include.line,
+            "Include": include.name,
+            "形式": include.kind,
+            "条件": _cpp_conditions(include.conditions),
+            "匹配": include.resolution,
+            "目标": report.repository.relative_path(include.target)
+            if include.target is not None
+            else "未确定",
+            "候选目标": "、".join(
+                report.repository.relative_path(candidate)
+                for candidate in include.candidates[:limit]
+            )
+            + (
+                f"（其余 {len(include.candidates) - limit} 项见 JSON）"
+                if len(include.candidates) > limit
+                else ""
+            ),
+        }
+        for path, include in islice(
+            (
+                (path, include)
+                for path, item in cpp.files.items()
+                for include in item.include_details
+            ),
+            limit,
+        )
+    ]
+    if rows:
+        st.dataframe(rows, width="stretch", hide_index=True)
+        _reading_limit_hint(
+            st, sum(len(item.include_details) for item in cpp.files.values()), limit
+        )
+    else:
+        st.info("没有采集到 Include 指令。")
+    st.subheader("C++ 入口候选")
+    entries: list[Row] = [
+        {
+            "文件": report.repository.relative_path(entry.path),
+            "名称": entry.name,
+            "行号": entry.line,
+            "条件": _cpp_conditions(entry.conditions),
+        }
+        for entry in cpp.entry_points[:limit]
+    ]
+    if entries:
+        st.dataframe(entries, width="stretch", hide_index=True)
+        _reading_limit_hint(st, len(cpp.entry_points), limit)
+    else:
+        st.info("没有识别到 C++ 入口候选。")
+
+
+def _cpp_conditions(conditions: tuple[str, ...]) -> str:
+    """保留各层条件的组合边界，不推断分支是否启用。"""
+    return " && ".join(f"({condition})" for condition in conditions) or "无"
 
 
 def _render_git(report: RepositoryReport, st: StreamlitApi) -> None:
@@ -991,9 +1219,18 @@ def _render_downloads(
     *,
     cache_key: str | None = None,
 ) -> None:
-    """展示报告预览并提供完整 Markdown 和 JSON 下载。"""
+    """按所选详情提供 Markdown，JSON 始终保留完整报告。"""
+    detail_label = st.selectbox(
+        "Markdown 详情", ["摘要", "完整"], key="markdown_detail"
+    )
+    detail = "summary" if detail_label == "摘要" else "full"
+
+    def render_markdown(current: RepositoryReport) -> str:
+        """使用与 CLI 相同的详情选项生成报告。"""
+        return MarkdownRenderer().render(current, detail=detail)
+
     markdown = _cached_report_text(
-        report, st, "markdown", MarkdownRenderer().render, cache_key
+        report, st, f"markdown-{detail}", render_markdown, cache_key
     )
     json_text = _cached_report_text(
         report, st, "json", JsonRenderer().render, cache_key
@@ -1049,7 +1286,7 @@ def _cached_report_text(
         if (
             isinstance(old_key, str)
             and old_key.startswith("_repopath_report_")
-            and old_key != key
+            and not old_key.startswith(f"_repopath_report_{cache_key}_")
         ):
             session_state.pop(old_key, None)
     session_state[key] = value

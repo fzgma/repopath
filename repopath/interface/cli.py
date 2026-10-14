@@ -164,6 +164,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="关闭评分和阅读路线",
     )
+    parser.add_argument(
+        "--reading-guide",
+        dest="reading_enabled",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="开启试验性阅读指南，按来源证据提供片段与关联（默认关闭）",
+    )
     return parser
 
 
@@ -331,6 +338,7 @@ def _resolve_options(
             git_enabled=args.git_enabled,
             dependencies_enabled=dependencies_enabled,
             insights_enabled=insights_enabled,
+            reading_enabled=args.reading_enabled,
             **(github_limits or {}),
         )
     except ValueError as exc:

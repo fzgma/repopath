@@ -14,6 +14,7 @@ from repopath.model.git import GitSummary
 from repopath.model.options import AnalysisOptions
 from repopath.model.report import RepositoryReport
 from repopath.model.repository import Repository
+from repopath.model.result import AnalyzerName
 from repopath.provider.git import GitProvider
 from repopath.renderer.json import JsonRenderer
 from repopath.renderer.markdown import MarkdownRenderer
@@ -25,7 +26,7 @@ FIXTURE = Path(__file__).parent / "fixtures" / "mixed_repo"
 def test_profile_execution_matches_report(profile: str) -> None:
     report = analyze_repository(FIXTURE, options=AnalysisOptions.for_profile(profile))
     payload = json.loads(JsonRenderer().render(report))
-    assert len(report.analyzer_results) == 7
+    assert set(report.analyzer_results) == set(AnalyzerName)
     for name, result in report.analyzer_results.items():
         expected = "completed" if report.options.analyzer_enabled(name) else "not_run"
         assert result.status == expected

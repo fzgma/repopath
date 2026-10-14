@@ -25,6 +25,7 @@ def compose_report(
         git=state.artifacts.git,
         dependencies=state.artifacts.dependencies,
         insights=state.artifacts.insights,
+        reading_guide=state.artifacts.reading_guide,
         analyzer_durations=state.durations,
         warnings=state.warnings,
         errors=state.errors,

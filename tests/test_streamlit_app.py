@@ -87,6 +87,9 @@ max_file_size = 3145728
 [git]
 period = "90"
 
+[analyzers]
+reading = true
+
 [report]
 limit = 12
 reading_limit = 4
@@ -105,3 +108,16 @@ include_file_list = true
     assert app.selectbox[0].value == "最近 90 天"
     assert [item.value for item in app.number_input] == [3, 12, 4]
     assert app.checkbox[0].value is True
+    guide = next(item for item in app.checkbox if item.label == "试验性阅读指南")
+    assert guide.value is True
+
+    app.segmented_control[1].set_value("快速").run(timeout=10)
+    assert next(
+        item for item in app.checkbox if item.label == "试验性阅读指南"
+    ).value is True
+    guide = next(item for item in app.checkbox if item.label == "试验性阅读指南")
+    guide.uncheck().run(timeout=10)
+    app.segmented_control[1].set_value("深度").run(timeout=10)
+    assert next(
+        item for item in app.checkbox if item.label == "试验性阅读指南"
+    ).value is False

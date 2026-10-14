@@ -1,8 +1,24 @@
 """Markdown 报告 Renderer。"""
 
+import re
+from collections import Counter
+from html import escape
+
 from ..model.file import FileRecord
 from ..model.report import RepositoryReport
 from ..model.result import AnalyzerName, AnalyzerStatus
+from .reading import (
+    CONFIDENCE_LABELS,
+    EVIDENCE_LABELS,
+    GAP_LABELS,
+    KIND_LABELS,
+    READING_BOUNDARY,
+    READING_STEP_LIMIT,
+    format_location,
+    reading_detail_limit,
+    reading_state,
+    unique_preview_locations,
+)
 
 
 def markdown_cell(value: object) -> str:
@@ -28,6 +44,21 @@ def _markdown_cycle_member(node: str) -> str:
 def _cpp_conditions(conditions: tuple[str, ...]) -> str:
     """用括号区分嵌套条件，保留每层表达式原有的运算顺序。"""
     return " && ".join(f"({condition})" for condition in conditions) or "无"
+
+
+def _reading_text(value: object) -> str:
+    """将仓库提供的文本作为普通文字展示，避免改变 Markdown 结构。"""
+    text = escape(" ".join(str(value).splitlines()), quote=False)
+    return re.sub(r"([\\`*_{}\[\]()|~])", r"\\\1", text)
+
+
+def _reading_preview(excerpt: str) -> list[str]:
+    """用长于内容中所有反引号的围栏保留代码原文。"""
+    if not excerpt:
+        return []
+    longest = max((len(item) for item in re.findall(r"`+", excerpt)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return ["", f"{fence}text\n{excerpt}\n{fence}", ""]
 
 
 class MarkdownRenderer:
@@ -94,6 +125,7 @@ class MarkdownRenderer:
                 for message in report.errors
             )
         self._append_analysis_hint(lines, report)
+        self._append_reading_guide(lines, report)
 
         lines.extend(
             [
@@ -620,6 +652,7 @@ class MarkdownRenderer:
                 lines.append(f"- 固定提交：`{reference}`")
         self._append_summary_messages(lines, report)
         self._append_analysis_hint(lines, report)
+        self._append_reading_guide(lines, report, detail="summary")
 
         lines.extend(["", "## Python 核心模块", ""])
         if report.python.core_modules:
@@ -691,6 +724,106 @@ class MarkdownRenderer:
                     f"Churn {change.churn}，提交 {change.commits} 次"
                 )
         return self._with_status(lines, report)
+
+    @staticmethod
+    def _append_reading_guide(
+        lines: list[str], report: RepositoryReport, *, detail: str = "full",
+    ) -> None:
+        """摘要先列阅读线索，完整报告再展开证据与去重后的片段。"""
+        guide = report.reading_guide
+        result = report.analyzer_result(AnalyzerName.READING)
+        limit = reading_detail_limit(report)
+        lines.extend([
+            "", "## 阅读指南（试验）", "",
+            f"状态：`{result.status}` · {len(guide.steps)} 步"
+            + (" · 已截断" if guide.truncated else ""),
+        ])
+        if result.reason:
+            lines.append(f"- 原因：{_reading_text(result.reason)}")
+        if not result.successful or not guide.steps or guide.gaps or guide.truncated:
+            lines.extend(["", reading_state(report)])
+        for label, messages in (("警告", result.warnings), ("错误", result.errors)):
+            for message in messages[:limit]:
+                lines.append(f"- {label}：{_reading_text(message)}")
+            MarkdownRenderer._append_reading_omission(lines, len(messages), limit, label)
+        if result.status == AnalyzerStatus.NOT_RUN:
+            return
+        lines.extend(["", READING_BOUNDARY, ""])
+        if detail == "summary":
+            if guide.steps:
+                lines.extend([
+                    "| 位置 | 阅读线索 | 依据 |",
+                    "| --- | --- | --- |",
+                ])
+            for step in guide.steps[:READING_STEP_LIMIT]:
+                confidence = CONFIDENCE_LABELS.get(step.confidence, step.confidence)
+                kind = KIND_LABELS.get(step.kind, step.kind)
+                lines.append(markdown_row(
+                    _reading_text(format_location(step.location)),
+                    _reading_text(step.summary),
+                    _reading_text(f"{kind} · {confidence}"),
+                ))
+            MarkdownRenderer._append_reading_omission(lines, len(guide.steps), READING_STEP_LIMIT, "步骤")
+            if guide.gaps:
+                counts = Counter(GAP_LABELS.get(gap.kind, gap.kind) for gap in guide.gaps)
+                labels = [f"{kind} ×{count}" for kind, count in counts.items()]
+                lines.extend(["", "限制：" + _reading_text("；".join(labels[:limit])) + "。"])
+                MarkdownRenderer._append_reading_omission(lines, len(labels), limit, "限制类别")
+            lines.extend([
+                "", "来源、片段和限制详情：CLI 使用 `--detail full`，UI 展开“依据与片段”和“分析说明”。JSON 保存本次保留的计划与证据。",
+            ])
+            return
+        for index, step in enumerate(guide.steps[:READING_STEP_LIMIT], start=1):
+            confidence = CONFIDENCE_LABELS.get(step.confidence, step.confidence)
+            kind = KIND_LABELS.get(step.kind, step.kind)
+            lines.extend([
+                "", f"### 步骤 {index}：{_reading_text(step.question)}", "",
+                f"{_reading_text(step.summary)}（{_reading_text(kind)} · {_reading_text(confidence)}）",
+                "",
+                f"- 位置：{_reading_text(format_location(step.location))}",
+                f"- 主题：{_reading_text(step.topic)}",
+            ])
+            if not step.evidence:
+                lines.append("- 没有附带证据记录，需返回原文核对。")
+            for evidence in step.evidence[:limit]:
+                kind = EVIDENCE_LABELS.get(evidence.kind, evidence.kind)
+                lines.append(
+                    f"- 依据（{_reading_text(kind)}）：{_reading_text(evidence.description)}"
+                    f"（{_reading_text(format_location(evidence.location))}）"
+                )
+            MarkdownRenderer._append_reading_omission(lines, len(step.evidence), limit, "证据")
+            if step.related:
+                for location in step.related[:limit]:
+                    lines.append(f"- 关联候选：{_reading_text(format_location(location))}")
+                MarkdownRenderer._append_reading_omission(lines, len(step.related), limit, "关联位置")
+            for location in unique_preview_locations(step, limit):
+                lines.extend(["", f"片段：{_reading_text(format_location(location))}"])
+                lines.extend(_reading_preview(location.excerpt))
+        MarkdownRenderer._append_reading_omission(lines, len(guide.steps), READING_STEP_LIMIT, "步骤")
+        lines.extend([
+            "", "### 分析说明", "",
+            f"扫描 {guide.scanned_files} 个文件，{guide.candidate_count} 个候选。",
+        ])
+        if guide.truncated:
+            lines.append("已截断；JSON 不包含未入选候选、超预算关联或未分析内容。")
+        for capability in guide.capabilities[:limit]:
+            lines.append(f"- {_reading_text(capability)}")
+        if not guide.capabilities:
+            lines.append("没有能力范围记录。")
+        MarkdownRenderer._append_reading_omission(lines, len(guide.capabilities), limit, "能力记录")
+        for gap in guide.gaps[:limit]:
+            kind = GAP_LABELS.get(gap.kind, gap.kind)
+            path = f"（{_reading_text(gap.path)}）" if gap.path else ""
+            lines.append(f"- {_reading_text(kind)}：{_reading_text(gap.message)}{path}")
+        MarkdownRenderer._append_reading_omission(lines, len(guide.gaps), limit, "缺口")
+
+    @staticmethod
+    def _append_reading_omission(
+        lines: list[str], count: int, limit: int, label: str,
+    ) -> None:
+        """区分展示省略与分析阶段未采集到的内容。"""
+        if count > limit:
+            lines.extend(["", f"其余 {count - limit} 条{label}在此省略；本列表的全部条目见 JSON 的 reading_guide。"])
 
     @staticmethod
     def _append_entries(
@@ -867,7 +1000,7 @@ class MarkdownRenderer:
         hints: list[str] = []
         if not options.dependencies_enabled:
             hints.append(
-                "当前未启用依赖分析，因此不会生成依赖图、推荐阅读和变更关注模块。"
+                "当前未启用依赖分析，因此不会生成依赖图、基于依赖的推荐阅读和变更关注模块；阅读指南可单独启用。"
             )
         if not options.git_enabled:
             hints.append(
@@ -897,6 +1030,8 @@ class MarkdownRenderer:
             names.append("dependencies")
         if options.insights_enabled:
             names.append("insights")
+        if options.reading_enabled:
+            names.append("reading")
         return ", ".join(names)
 
     @staticmethod

@@ -1,6 +1,7 @@
 """JSON 报告 Renderer。"""
 
 import json
+from dataclasses import asdict
 from typing import Any
 
 from ..model.report import RepositoryReport
@@ -62,6 +63,7 @@ class JsonRenderer:
                 "git_period": report.options.git_period,
                 "result_limit": report.options.result_limit,
                 "reading_limit": report.options.reading_limit,
+                "reading_enabled": report.options.reading_enabled,
                 "include_file_list": report.options.include_file_list,
                 "analyzer_durations": report.analyzer_durations,
             },
@@ -285,6 +287,11 @@ class JsonRenderer:
                     for item in report.insights.change_attention
                 ],
             },
+            "reading_guide": {
+                "experimental": True,
+                "enabled": report.options.reading_enabled,
+                **asdict(report.reading_guide),
+            },
             "git": {
                 "available": report.git.available,
                 "commit_count": report.git.commit_count,
@@ -374,6 +381,13 @@ class JsonRenderer:
             result = report.analyzer_result(name)
             payload[name]["status"] = result.status
             payload[name]["reason"] = result.reason
+        reading_result = report.analyzer_result(AnalyzerName.READING)
+        payload["reading_guide"].update({
+            "status": reading_result.status,
+            "reason": reading_result.reason,
+            "warnings": reading_result.warnings,
+            "errors": reading_result.errors,
+        })
         overview_fields: dict[AnalyzerName, tuple[str, ...]] = {
             AnalyzerName.FILES: ("file_count",),
             AnalyzerName.STATISTICS: ("non_empty_lines", "language_count", "comment_lines"),

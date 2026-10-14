@@ -10,6 +10,7 @@ from .git import GitSummary
 from .insight import RepositoryInsights
 from .options import AnalysisOptions
 from .python import PythonAnalysis
+from .reading import ReadingGuide
 from .repository import GitHubRateLimit, Repository, RepositorySource
 from .result import (
     AnalysisAvailability,
@@ -27,7 +28,7 @@ class RepositoryReport:
     repository: Repository
     source: RepositorySource | None = None
     github_rate_limit: GitHubRateLimit | None = None
-    schema_version: str = "0.5"
+    schema_version: str = "0.6"
     tool_version: str = __version__
     generated_at: str = ""
     options: AnalysisOptions = field(default_factory=AnalysisOptions)
@@ -49,6 +50,7 @@ class RepositoryReport:
     warnings: list[str] = field(default_factory=list[str])
     errors: list[str] = field(default_factory=list[str])
     analyzer_results: dict[AnalyzerName, AnalysisResult] = field(default_factory=dict)
+    reading_guide: ReadingGuide = field(default_factory=ReadingGuide)
 
     def analyzer_result(self, name: AnalyzerName) -> AnalysisResult:
         """读取执行证据，缺失记录不代表已完成。"""

@@ -91,7 +91,7 @@ def test_ui_reads_report_settings_from_repository_config(
     """验证 UI 默认值读取仓库配置中的报告设置。"""
     (tmp_path / ".repopath.toml").write_text(
         "[report]\nlimit = 12\nreading_limit = 4\n"
-        "include_file_list = true\n",
+        "include_file_list = true\n[analyzers]\nreading = true\n",
         encoding="utf-8",
     )
 
@@ -100,6 +100,7 @@ def test_ui_reads_report_settings_from_repository_config(
     assert options.result_limit == 12
     assert options.reading_limit == 4
     assert options.include_file_list is True
+    assert options.reading_enabled is True
 
 
 def test_ui_does_not_reuse_local_input_for_github_source() -> None:
@@ -160,6 +161,7 @@ def test_ui_submits_github_source_without_writing_config(
         result_limit=10,
         reading_limit=10,
         include_file_list=False,
+        reading_enabled=True,
         load_options=load_analysis_options,
         ensure_config=ensure_default_config,
     )
@@ -169,6 +171,38 @@ def test_ui_submits_github_source_without_writing_config(
         RepositorySource.github("example/demo", "main")
     ]
     assert not (tmp_path / ".repopath.toml").exists()
+    assert analyzer.options[0].reading_enabled is True
+
+
+def test_ui_reading_switch_overrides_config_without_following_profile(
+    tmp_path: Path,
+) -> None:
+    """验证指南配置可跨模式保留，也可显式关闭。"""
+    (tmp_path / ".repopath.toml").write_text(
+        "[analyzers]\nreading = true\n", encoding="utf-8"
+    )
+    analyzer = _RecordingAnalyzer(tmp_path)
+    runtime = AnalysisRuntime(analyzer)
+    for override in (None, False):
+        _start_analysis(
+            runtime=runtime,
+            source=str(tmp_path),
+            reference=None,
+            is_github=False,
+            label="快速",
+            git_label="全部历史",
+            max_file_size_mb=2,
+            result_limit=50,
+            reading_limit=10,
+            include_file_list=False,
+            reading_enabled=override,
+            load_options=load_analysis_options,
+            ensure_config=ensure_default_config,
+        )
+        _wait_for_runtime(runtime)
+
+    assert [options.reading_enabled for options in analyzer.options] == [True, False]
+    assert all(not options.dependencies_enabled for options in analyzer.options)
 
 
 def test_ui_submits_github_snapshot_limits(

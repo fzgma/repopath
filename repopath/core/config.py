@@ -23,6 +23,7 @@ exclude = []
 # git = false
 # dependencies = false
 # insights = false
+# reading = true  # 试验性阅读指南，可独立于依赖图启用
 
 [git]
 period = "all"
@@ -120,6 +121,7 @@ def load_analysis_options(
             git_enabled=_optional_bool(analyzers, "git"),
             dependencies_enabled=dependencies_enabled,
             insights_enabled=insights_enabled,
+            reading_enabled=_optional_bool(analyzers, "reading"),
             git_period=str(git["period"]) if "period" in git else None,
             github_archive_max_bytes=_megabytes_to_bytes(
                 github, "archive_max_mb"

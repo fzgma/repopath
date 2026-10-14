@@ -97,6 +97,11 @@ jobs:
           python scripts/check_cpp_analysis.py
           --artifact build/${{ matrix.executable }}
 
+      - name: Check reading guide in relocated executable
+        run: >-
+          python scripts/check_reading_guide.py
+          --artifact build/${{ matrix.executable }}
+
       - name: Create Windows checksum
         if: matrix.platform == 'windows-x64'
         shell: pwsh

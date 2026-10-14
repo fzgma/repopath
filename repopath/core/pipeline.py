@@ -1,17 +1,17 @@
 """Analyzer Pipeline。"""
 
-from collections.abc import Iterable
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from time import perf_counter
 
 from ..analyzer.base import Analyzer
 from ..analyzer.cpp import CppAnalyzer
+from ..analyzer.dependency_analyzer import DependencyAnalyzer
 from ..analyzer.file_analyzer import FileAnalyzer
 from ..analyzer.git_analyzer import GitAnalyzer
-from ..analyzer.python import PythonAnalyzer
-from ..analyzer.statistics_analyzer import StatisticsAnalyzer
-from ..analyzer.dependency_analyzer import DependencyAnalyzer
 from ..analyzer.insight_analyzer import InsightAnalyzer
+from ..analyzer.python import PythonAnalyzer
+from ..analyzer.reading_analyzer import ReadingAnalyzer
+from ..analyzer.statistics_analyzer import StatisticsAnalyzer
 from ..model.options import AnalysisOptions
 from ..model.result import (
     AnalysisProgress,
@@ -49,6 +49,7 @@ class Pipeline:
                 if context.options.analyzer_enabled(name)
             ],
             AnalyzerName.INSIGHTS: [AnalyzerName.DEPENDENCIES],
+            AnalyzerName.READING: [AnalyzerName.FILES],
         }
         for analyzer in self.analyzers:
             if not context.options.analyzer_enabled(analyzer.name):
@@ -135,5 +136,6 @@ def default_pipeline(
             GitAnalyzer(),
             DependencyAnalyzer(),
             InsightAnalyzer(),
+            ReadingAnalyzer(),
         ]
     )

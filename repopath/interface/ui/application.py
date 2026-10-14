@@ -163,6 +163,15 @@ def render_application(
                 help="默认不包含，以避免 Markdown 报告在大型仓库中变得过长。",
                 key=f"include-file-list:{source_key}",
             )
+            reading_enabled = st.checkbox(
+                "试验性阅读指南",
+                value=configured_options.reading_enabled,
+                help=(
+                    "按文档与源码证据整理阅读片段，保留来源和未知项。"
+                    "独立于分析模式，不要求 Git 历史或依赖图。"
+                ),
+                key=f"reading-enabled:{source_key}",
+            )
             if is_github:
                 st.caption("GitHub 快照限制")
                 github_archive_max_mb = st.number_input(
@@ -240,6 +249,7 @@ def render_application(
             result_limit=int(result_limit),
             reading_limit=int(reading_limit),
             include_file_list=include_file_list,
+            reading_enabled=reading_enabled,
             github_archive_max_mb=(
                 int(github_archive_max_mb or 0) if is_github else None
             ),
@@ -370,6 +380,7 @@ def _start_analysis(
     result_limit: int,
     reading_limit: int,
     include_file_list: bool,
+    reading_enabled: bool | None = None,
     github_archive_max_mb: int | None = None,
     github_file_limit: int | None = None,
     github_content_max_mb: int | None = None,
@@ -408,6 +419,7 @@ def _start_analysis(
             result_limit=result_limit,
             reading_limit=reading_limit,
             include_file_list=include_file_list,
+            reading_enabled=reading_enabled,
             github_archive_max_bytes=(
                 github_archive_max_mb * 1024 * 1024
                 if github_archive_max_mb is not None
