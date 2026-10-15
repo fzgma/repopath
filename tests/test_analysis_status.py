@@ -14,7 +14,7 @@ from repopath.model.git import GitSummary
 from repopath.model.options import AnalysisOptions
 from repopath.model.report import RepositoryReport
 from repopath.model.repository import Repository
-from repopath.model.result import AnalyzerName
+from repopath.model.result import AnalysisProgress, AnalyzerName
 from repopath.provider.git import GitProvider
 from repopath.renderer.json import JsonRenderer
 from repopath.renderer.markdown import MarkdownRenderer
@@ -69,11 +69,13 @@ def test_dependency_failure_skips_insights(monkeypatch: pytest.MonkeyPatch) -> N
         raise RuntimeError("graph failed")
 
     monkeypatch.setattr(DependencyAnalyzer, "analyze", fail)
-    events = []
+    events: list[AnalysisProgress] = []
     report = analyze_repository(FIXTURE, progress_callback=events.append)
-    assert report.analyzer_results["dependencies"].status == "failed"
-    assert report.analyzer_results["insights"].status == "not_run"
-    assert "dependencies" in report.analyzer_results["insights"].reason
+    assert report.analyzer_results[AnalyzerName.DEPENDENCIES].status == "failed"
+    insights_result = report.analyzer_results[AnalyzerName.INSIGHTS]
+    assert insights_result.status == "not_run"
+    assert insights_result.reason is not None
+    assert "dependencies" in insights_result.reason
     assert events[-1].percent == 100
     payload = json.loads(JsonRenderer().render(report))
     assert payload["dependencies"]["status"] == "failed"
@@ -180,6 +182,9 @@ def test_missing_git_preserves_navigation_without_fabricating_scores(
     def fail(*args: object) -> None:
         raise RuntimeError("git failed")
 
+    def unavailable_summary(provider: GitProvider, period: str = "all") -> GitSummary:
+        return GitSummary(error="history unavailable")
+
     options = AnalysisOptions(git_enabled=git_state != "disabled")
     if git_state == "failed":
         monkeypatch.setattr(GitAnalyzer, "analyze", fail)
@@ -187,10 +192,10 @@ def test_missing_git_preserves_navigation_without_fabricating_scores(
         monkeypatch.setattr(
             GitProvider,
             "summary",
-            lambda *args: GitSummary(error="history unavailable"),
+            unavailable_summary,
         )
     report = analyze_repository(FIXTURE, options=options)
-    assert report.analyzer_results["insights"].status == "completed"
+    assert report.analyzer_results[AnalyzerName.INSIGHTS].status == "completed"
     assert report.insights.reading_order
     assert report.insights.reading_paths
     assert not report.insights.change_attention
@@ -224,8 +229,11 @@ def test_missing_git_preserves_navigation_without_fabricating_scores(
 def test_available_git_with_zero_changes_is_a_completed_empty_result(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    def empty_summary(provider: GitProvider, period: str = "all") -> GitSummary:
+        return GitSummary(available=True)
+
     monkeypatch.setattr(
-        GitProvider, "summary", lambda *args: GitSummary(available=True)
+        GitProvider, "summary", empty_summary
     )
     report = analyze_repository(FIXTURE)
     availability = report.change_attention_availability()

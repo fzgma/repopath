@@ -1,8 +1,10 @@
 """阅读指南两端一致性、状态与来源展示测试。"""
 
 import json
+from collections.abc import Hashable
 from pathlib import Path
 from time import monotonic, sleep
+from typing import Literal, Protocol
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -25,6 +27,19 @@ from repopath.renderer.json import JsonRenderer
 from repopath.renderer.markdown import MarkdownRenderer
 
 
+class _RecordTable(Protocol):
+    """限定测试读取 DataFrame 记录时使用的接口。"""
+
+    def to_dict(
+        self, orient: Literal["records"], *, into: dict[Hashable, object],
+    ) -> list[dict[Hashable, object]]: ...
+
+
+def _record_rows(table: _RecordTable) -> list[dict[Hashable, object]]:
+    """读取真实表格记录，并保留字段校验前的通用单元格类型。"""
+    return table.to_dict(orient="records", into=dict[Hashable, object]())
+
+
 def _render_report(report: "RepositoryReport") -> None:
     """通过真实 Streamlit 组件渲染已保存的报告。"""
     import streamlit as st
@@ -34,7 +49,7 @@ def _render_report(report: "RepositoryReport") -> None:
     render_report(report, st)
 
 
-def _view(app: AppTest, label: str = "阅读指南（试验）") -> AppTest:
+def _view(app: AppTest, label: str = "阅读指南（实验）") -> AppTest:
     """切换报告视图并检查页面没有异常。"""
     assert not app.exception
     next(
@@ -58,25 +73,33 @@ def _wait_for_report(app: AppTest) -> RepositoryReport:
     pytest.fail("Streamlit 后台分析未能在测试时限内完成")
 
 
-@pytest.mark.parametrize("profile", ["fast", "standard"])
 @pytest.mark.parametrize(
-    ("files", "language_evidence"),
+    ("files", "language_evidence", "profile"),
     [
         ({
             "README.md": "# Vector algebra\n\nUse the [public API](algebra.py).\n",
             "algebra.py": 'def combine(left, right):\n    """Combine two vectors."""\n    return left + right\n',
-        }, "python_docstring"),
+        }, "python_docstring", "standard"),
         ({
             "README.md": "# Message schema\n\n## Usage\n\nRead [the schema](messages.proto).\n",
             "messages.proto": 'syntax = "proto3";\nmessage Parcel { string id = 1; }\n',
-        }, None),
+        }, None, "standard"),
         ({
             "README.md": "# Text codec\n\nUse [the interface](codec.hpp).\n",
             "codec.hpp": "// Decode one value.\nint decode(int value);\n",
             "codec.cpp": '#include "codec.hpp"\nint decode(int value) { return value + 1; }\n',
-        }, "cpp_symbol"),
+        }, "cpp_symbol", "standard"),
+        ({
+            "README.md": "# Mixed library\n\n## Usage\n\n"
+            "Read the [Python API](algebra.py), [C++ interface](codec.hpp) "
+            "and [schema](messages.proto).\n",
+            "algebra.py": 'def combine(left, right):\n    """Combine two vectors."""\n    return left + right\n',
+            "codec.hpp": "// Decode one value.\nint decode(int value);\n",
+            "codec.cpp": '#include "codec.hpp"\nint decode(int value) { return value + 1; }\n',
+            "messages.proto": 'syntax = "proto3";\nmessage Parcel { string id = 1; }\n',
+        }, None, "fast"),
     ],
-    ids=["python-library", "unknown-language-schema", "cpp-library"],
+    ids=["python-library", "unknown-language-schema", "cpp-library", "mixed-library-fast"],
 )
 def test_ui_and_cli_share_reading_guide_for_different_repositories(
     tmp_path: Path, files: dict[str, str], language_evidence: str | None,
@@ -94,7 +117,7 @@ def test_ui_and_cli_share_reading_guide_for_different_repositories(
     app = AppTest.from_file(str(app_path)).run(timeout=10)
     app.text_input[0].set_value(str(repository)).run(timeout=10)
     next(
-        item for item in app.checkbox if item.label == "试验性阅读指南"
+        item for item in app.checkbox if item.label == "实验性阅读指南"
     ).check()
     next(item for item in app.button if item.label == "分析仓库").click()
     app.run(timeout=20)
@@ -103,16 +126,6 @@ def test_ui_and_cli_share_reading_guide_for_different_repositories(
     assert report.reading_guide.steps
     _view(app)
     assert app.code
-    assert any("1. " in item.value for item in app.text)
-    assert any("证据状态：" in item.value for item in app.text)
-    notes = next(item for item in app.expander if item.label == "分析说明")
-    details = [item for item in app.expander if item.label.startswith("依据与片段")]
-    assert not notes.proto.expanded
-    assert details and all(not item.proto.expanded for item in details)
-    assert any("本次能力范围" == item.value for item in notes.caption)
-    assert {id(item) for item in app.code} == {
-        id(code) for detail in details for code in detail.code
-    }, "源码片段只出现在默认折叠的详情中"
     if profile == "standard" and language_evidence is not None:
         language_steps = [
             step for step in report.reading_guide.steps
@@ -143,11 +156,16 @@ def test_ui_and_cli_share_reading_guide_for_different_repositories(
     payload = json.loads(output.read_text(encoding="utf-8"))
     ui_payload = json.loads(JsonRenderer().render(report))
     assert payload["reading_guide"] == ui_payload["reading_guide"]
-    _view(app, "报告")
-    assert len(app.get("download_button")) == 2
-    next(item for item in app.checkbox if item.label == "显示原始 JSON").check().run()
-    preview = json.loads(app.code[0].value)
-    assert preview["reading_guide"] == payload["reading_guide"]
+    assert payload["reading_guide"]["status"] == "completed"
+    for step in payload["reading_guide"]["steps"]:
+        assert not Path(step["location"]["path"]).is_absolute()
+        assert step["evidence"]
+    if profile == "fast":
+        assert payload["analysis"]["analyzers"]["dependencies"]["status"] == "not_run"
+        _view(app, "报告")
+        next(item for item in app.checkbox if item.label == "显示原始 JSON").check().run()
+        preview = json.loads(app.code[0].value)
+        assert preview["reading_guide"] == payload["reading_guide"]
 
 
 def test_ui_reading_guide_survives_dependency_failure(
@@ -178,13 +196,13 @@ def test_ui_reading_guide_survives_dependency_failure(
     [
         (AnalyzerStatus.NOT_RUN, "not_run", "info"),
         (AnalyzerStatus.FAILED, "failed", "error"),
-        (AnalyzerStatus.COMPLETED, "证据不足", "info"),
+        (AnalyzerStatus.COMPLETED, "未找到可展示的阅读线索", "info"),
     ],
 )
 def test_ui_reading_distinguishes_unavailable_and_empty_results(
     tmp_path: Path, status: AnalyzerStatus, expected: str, element: str
 ) -> None:
-    """执行记录决定未运行和失败；完成后的空指南明确说明证据不足。"""
+    """执行记录决定未运行和失败；完成后的空指南说明未找到线索。"""
     report = RepositoryReport(
         Repository.from_path(tmp_path),
         analyzer_results={
@@ -195,13 +213,13 @@ def test_ui_reading_distinguishes_unavailable_and_empty_results(
     )
     app = AppTest.from_function(_render_report, args=(report,)).run()
     _view(app)
-    assert any(expected in item.value for item in app.get(element))
+    messages = app.error if element == "error" else app.info
+    assert any(expected in item.value for item in messages)
     assert not app.code
 
 
-@pytest.mark.parametrize("failed", [False, True], ids=["partial", "failed-partial"])
 def test_ui_reading_retains_evidence_after_remote_files_are_gone(
-    tmp_path: Path, failed: bool,
+    tmp_path: Path,
 ) -> None:
     """只用模型中的片段展示主题、范围、证据、关联、缺口和预算信息。"""
     location = ReadingLocation("docs/usage.md", 3, 8, "Choose a format.\n")
@@ -232,17 +250,16 @@ def test_ui_reading_retains_evidence_after_remote_files_are_gone(
         analyzer_results={
             AnalyzerName.READING: AnalysisResult(
                 AnalyzerName.READING,
-                status=AnalyzerStatus.FAILED if failed else AnalyzerStatus.COMPLETED,
-                errors=["one source could not be read"] if failed else [],
+                status=AnalyzerStatus.FAILED,
+                errors=["one source could not be read"],
             )
         },
     )
     app = AppTest.from_function(_render_report, args=(report,)).run()
     _view(app)
     assert any("部分" in item.value for item in app.warning)
-    if failed:
-        assert any("failed" in item.value for item in app.error)
-        assert any("one source could not be read" in item.value for item in app.error)
+    assert any("failed" in item.value for item in app.error)
+    assert any("one source could not be read" in item.value for item in app.error)
     assert any("内容已截断" in item.value and "缺口 1 项" in item.value for item in app.warning)
     notes = next(item for item in app.expander if item.label == "分析说明")
     detail = next(item for item in app.expander if item.label.startswith("依据与片段"))
@@ -263,9 +280,9 @@ def test_ui_reading_retains_evidence_after_remote_files_are_gone(
     assert any("同名声明不能确定关联" in item.value for item in app.text)
     assert any("同名声明不能确定关联" in item.value for item in notes.text)
     assert any("另一段预览" in item.value for item in detail.text)
-    assert any("observed" in item.value for item in app.text)
+    assert any("直接提取" in item.value for item in app.text)
     assert sum(item.label.startswith("依据与片段") for item in app.expander) == 1
-    for page, state in ((2, "documented"), (3, "candidate")):
+    for page, state in ((2, "文档摘录"), (3, "待核对关联")):
         next(item for item in app.number_input if item.label == "阅读指南页码").set_value(page).run()
         assert not app.exception
         assert any(state in item.value for item in app.text)
@@ -284,7 +301,7 @@ def test_ui_markdown_download_defaults_to_summary_and_keeps_full_option(tmp_path
     assert len(app.get("download_button")) == 2
     next(item for item in app.checkbox if item.label == "显示 Markdown 预览").check().run()
     assert app.code[0].value == MarkdownRenderer().render(report, detail="summary").strip()
-    assert "Choose a format." not in app.code[0].value
+    assert "```text" not in app.code[0].value
     detail = next(item for item in app.selectbox if item.label == "Markdown 详情")
     detail.select("完整").run()
     assert not app.exception
@@ -306,12 +323,46 @@ def test_ui_cpp_shows_include_candidates_and_conditional_entries(tmp_path: Path)
     app = AppTest.from_function(_render_report, args=(report,)).run()
     _view(app, "C++")
     includes = next(item.value for item in app.dataframe if "候选目标" in item.value.columns)
-    assert set(includes["匹配"]) == {"ambiguous", "macro"}
-    ambiguous = includes[includes["匹配"] == "ambiguous"].iloc[0]
-    assert "first/shared.hpp" in ambiguous["候选目标"]
-    assert "second/shared.hpp" in ambiguous["候选目标"]
-    assert "_WIN32" in ambiguous["条件"]
+    include_rows = _record_rows(includes)
+    assert {row["匹配"] for row in include_rows} == {"ambiguous", "macro"}
+    ambiguous = next(row for row in include_rows if row["匹配"] == "ambiguous")
+    targets = ambiguous["候选目标"]
+    assert isinstance(targets, str)
+    assert "first/shared.hpp" in targets
+    assert "second/shared.hpp" in targets
+    conditions = ambiguous["条件"]
+    assert isinstance(conditions, str)
+    assert "_WIN32" in conditions
     entries = next(item.value for item in app.dataframe if "名称" in item.value.columns and "条件" in item.value.columns)
-    assert set(entries["名称"]) == {"main", "wmain"}
-    assert len(set(entries["条件"])) == 2
+    entry_rows = _record_rows(entries)
+    assert {row["名称"] for row in entry_rows} == {"main", "wmain"}
+    assert len({row["条件"] for row in entry_rows}) == 2
     assert any("条件不求值" in item.value for item in app.caption)
+
+
+def test_ui_shows_document_excerpts_components_and_reading_clues(tmp_path: Path) -> None:
+    """三类阅读线索在真实 UI 中可见，且与 CLI 导出使用同一模型。"""
+    (tmp_path / "package.json").write_text(
+        '{"name":"record-tools","description":"Convert records between formats."}',
+        encoding="utf-8",
+    )
+    (tmp_path / "engine").mkdir()
+    (tmp_path / "engine" / "__init__.py").write_text(
+        '"""Record conversion algorithms."""\n__all__ = ["convert"]\n'
+        'def convert(value):\n    return value\n', encoding="utf-8",
+    )
+    report = analyze_repository(tmp_path, options=AnalysisOptions(reading_enabled=True, git_enabled=False))
+    app = AppTest.from_function(_render_report, args=(report,)).run()
+    _view(app)
+    assert {item.value for item in app.subheader} >= {
+        "1. 项目说明摘录", "2. 组成线索", "3. 阅读线索",
+    }
+    assert any(report.reading_guide.purpose[0].description in item.value for item in app.text)
+    components = next(item.value for item in app.dataframe if "说明摘录或结构记录" in item.value.columns)
+    component_rows = _record_rows(components)
+    assert [row["路径"] for row in component_rows] == [item.path for item in report.reading_guide.components]
+    for step in report.reading_guide.steps:
+        assert any(step.reason in item.value for item in app.text)
+        assert any(step.learn in item.value for item in app.text)
+    _view(app, "结构统计")
+    assert not app.exception

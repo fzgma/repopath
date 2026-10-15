@@ -28,7 +28,7 @@ class RepositoryReport:
     repository: Repository
     source: RepositorySource | None = None
     github_rate_limit: GitHubRateLimit | None = None
-    schema_version: str = "0.6"
+    schema_version: str = "0.7"
     tool_version: str = __version__
     generated_at: str = ""
     options: AnalysisOptions = field(default_factory=AnalysisOptions)
@@ -49,7 +49,9 @@ class RepositoryReport:
     elapsed_seconds: float = 0.0
     warnings: list[str] = field(default_factory=list[str])
     errors: list[str] = field(default_factory=list[str])
-    analyzer_results: dict[AnalyzerName, AnalysisResult] = field(default_factory=dict)
+    analyzer_results: dict[AnalyzerName, AnalysisResult] = field(
+        default_factory=dict[AnalyzerName, AnalysisResult]
+    )
     reading_guide: ReadingGuide = field(default_factory=ReadingGuide)
 
     def analyzer_result(self, name: AnalyzerName) -> AnalysisResult:

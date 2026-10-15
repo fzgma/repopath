@@ -5,12 +5,13 @@ from ..model.report import RepositoryReport
 from ..model.result import AnalyzerName, AnalyzerStatus
 
 READING_BOUNDARY = (
-    "文档是作者说明；候选关系未经运行验证，不代表重要性或执行顺序。片段可能不完整。"
+    "实验性功能，仅按静态规则整理文档和源码线索；摘录可能偏题，关联需自行核对。"
+    "不能可靠概括项目用途、完整架构或阅读价值。"
 )
 CONFIDENCE_LABELS = {
-    "observed": "直接观察",
-    "documented": "文档描述",
-    "candidate": "候选关联",
+    "observed": "直接提取",
+    "documented": "文档摘录",
+    "candidate": "待核对关联",
 }
 KIND_LABELS = {
     "document": "文档片段",
@@ -19,6 +20,11 @@ KIND_LABELS = {
     "usage": "使用位置",
 }
 EVIDENCE_LABELS = {
+    "source_entry": "源码入口",
+    "project_description": "项目清单说明",
+    "project_document": "项目文档摘录",
+    "document_purpose": "介绍章节摘录",
+    "document_structure": "结构章节摘录",
     "document_section": "文档章节",
     "document_link": "文档链接",
     "manifest_entry": "清单声明",
@@ -30,6 +36,7 @@ EVIDENCE_LABELS = {
     "cpp_include": "C++ 头文件引用",
 }
 GAP_LABELS = {
+    "component_limit": "组成部分上限",
     "outside_root": "范围外路径",
     "outside_link": "范围外链接",
     "unresolved_link": "未定位链接",
@@ -40,7 +47,7 @@ GAP_LABELS = {
     "relation_budget": "关联检查上限",
     "related_limit": "关联位置上限",
     "gap_limit": "缺口记录上限",
-    "selection_limit": "阅读步骤上限",
+    "selection_limit": "阅读线索上限",
     "no_evidence": "缺少证据",
     "unreadable": "读取失败",
     "invalid_manifest": "清单解析失败",
@@ -95,7 +102,7 @@ def reading_state(report: RepositoryReport) -> str:
         return "阅读指南有错误；仅保留部分结果。"
     guide = report.reading_guide
     if not guide.steps:
-        return "证据不足以生成阅读步骤。"
+        return "未找到可展示的阅读线索。"
     if guide.gaps or guide.truncated:
-        return "部分阅读指南：存在分析缺口或截断。"
-    return "已生成阅读指南。"
+        return "部分阅读线索：存在分析缺口或截断。"
+    return "已整理阅读线索。"

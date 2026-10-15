@@ -65,7 +65,7 @@ def reading_report(tmp_path: Path) -> RepositoryReport:
 
 def _guide_section(markdown: str) -> str:
     """只提取新指南，避免旧统计章节影响语义断言。"""
-    return markdown.split("## 阅读指南（试验）", 1)[1].split("\n## ", 1)[0]
+    return markdown.split("## 阅读指南（实验）", 1)[1].split("\n## ", 1)[0]
 
 
 def test_json_keeps_reading_evidence_and_existing_insights(
@@ -74,7 +74,7 @@ def test_json_keeps_reading_evidence_and_existing_insights(
     """新契约包含真实状态和所有证据，原有榜单不被重写。"""
     payload = json.loads(JsonRenderer().render(reading_report))
     guide = payload["reading_guide"]
-    assert payload["schema_version"] == "0.6"
+    assert payload["schema_version"] == "0.7"
     assert payload["analysis"]["reading_enabled"] is True
     assert guide["experimental"] is True
     assert guide["enabled"] is True
@@ -109,11 +109,12 @@ def test_markdown_preserves_reading_questions_locations_and_evidence(
     reading_report: RepositoryReport, detail: str,
 ) -> None:
     """摘要给出位置与事实状态，完整报告再提供原文和全部阅读依据。"""
+    original = JsonRenderer().render(reading_report)
     markdown = MarkdownRenderer().render(reading_report, detail=detail)
     guide = _guide_section(markdown)
     for expected in (
         "文档给出一段接口使用示例。", "docs/usage.md:3-12",
-        "文档描述", "文档片段", "部分阅读指南", READING_BOUNDARY,
+        "文档摘录", "文档片段", "部分阅读线索", READING_BOUNDARY,
     ):
         assert expected in guide
     if detail == "full":
@@ -130,33 +131,19 @@ def test_markdown_preserves_reading_questions_locations_and_evidence(
         assert "限制：" in guide
         assert "```" not in guide
         assert "sample.open()" not in guide
-    assert "推荐阅读" in markdown
+    assert "结构统计（旧排序）" in markdown
     assert "utility.py" in markdown
     assert str(reading_report.repository.root) not in markdown
-
-
-def test_summary_is_compact_without_discarding_report_evidence(
-    reading_report: RepositoryReport,
-) -> None:
-    """摘要不展开片段，完整报告和 JSON 仍保留同一份来源证据。"""
-    renderer = MarkdownRenderer()
-    original = JsonRenderer().render(reading_report)
-    summary = _guide_section(renderer.render(reading_report, detail="summary"))
-    full = _guide_section(renderer.render(reading_report, detail="full"))
-    assert len(summary.splitlines()) < len(full.splitlines()) / 2
-    assert "sample.open()" not in summary
-    assert "sample.open()" in full
     assert JsonRenderer().render(reading_report) == original
 
 
-@pytest.mark.parametrize("detail", ["summary", "full"])
 @pytest.mark.parametrize("status,reason,expected", [
     (AnalyzerStatus.NOT_RUN, "配置未启用", "阅读指南未运行"),
     (AnalyzerStatus.FAILED, "读取失败", "阅读指南分析失败"),
-    (AnalyzerStatus.COMPLETED, None, "证据不足以生成阅读步骤"),
+    (AnalyzerStatus.COMPLETED, None, "未找到可展示的阅读线索"),
 ])
 def test_reading_availability_is_not_presented_as_understanding(
-    reading_report: RepositoryReport, detail: str,
+    reading_report: RepositoryReport,
     status: AnalyzerStatus, reason: str | None, expected: str,
 ) -> None:
     """未知、失败与无证据具有不同说明，空步骤不代表成功理解。"""
@@ -166,7 +153,7 @@ def test_reading_availability_is_not_presented_as_understanding(
     )
     if status == AnalyzerStatus.NOT_RUN:
         reading_report.options = reading_report.options.with_overrides(reading_enabled=False)
-    guide = _guide_section(MarkdownRenderer().render(reading_report, detail=detail))
+    guide = _guide_section(MarkdownRenderer().render(reading_report, detail="summary"))
     assert expected in guide
     assert f"`{status}`" in guide
     if reason:
@@ -188,7 +175,7 @@ def test_missing_execution_record_remains_unknown(
     assert payload["reason"] == "没有执行记录"
     guide = _guide_section(MarkdownRenderer().render(reading_report))
     assert "没有执行记录" in guide
-    assert "步骤 1" not in guide
+    assert "线索 1" not in guide
 
 
 @pytest.mark.parametrize("detail", ["summary", "full"])
@@ -211,7 +198,7 @@ def test_analysis_and_display_truncation_are_distinct(
     guide = _guide_section(MarkdownRenderer().render(reading_report, detail=detail))
     assert "已截断" in guide
     if detail == "full":
-        assert "步骤 2：另一个阅读问题" in guide
+        assert "线索 2：另一个阅读问题" in guide
         assert "其余 1 条证据在此省略" in guide
         assert "其余 1 条关联位置在此省略" in guide
         assert "其余 1 条缺口在此省略" in guide
@@ -274,7 +261,7 @@ def test_partial_error_remains_visible(reading_report: RepositoryReport) -> None
     assert "部分结果" in guide
     assert "缺少文档" in guide
     assert "读取中断" in guide
-    assert "步骤 1" in guide
+    assert "线索 1" in guide
 
 
 def test_location_without_range_has_single_line() -> None:

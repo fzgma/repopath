@@ -78,6 +78,16 @@ def collect_cpp(collector: ReadingCollector, state: AnalysisState) -> None:
     collector.guide.capabilities.append(
         "C++：文档关联片段、include 和同名定义候选；未分析宏、重载或类型。"
     )
+    for entry in state.artifacts.cpp.entry_points:
+        if not entry.path.is_relative_to(collector.root):
+            continue
+        path = entry.path.relative_to(collector.root).as_posix()
+        location = collector.location(path, entry.line, entry.line)
+        collector.anchor(Anchor(
+            path, f"程序入口：{path}",
+            ReadingEvidence("source_entry", location, f"源码中的 {entry.name} 入口候选。"),
+            symbol=entry.name,
+        ))
     anchors: dict[str, list[Anchor]] = defaultdict(list)
     for anchor in collector.anchors:
         anchors[anchor.path].append(anchor)
@@ -99,6 +109,8 @@ def collect_cpp(collector: ReadingCollector, state: AnalysisState) -> None:
             if (fragment.name, fragment.line) not in known:
                 continue
             for anchor in anchors[path]:
+                if anchor.symbol and fragment.name != anchor.symbol:
+                    continue
                 if not collector.relation():
                     return
                 if anchor.line is not None and (

@@ -1,6 +1,8 @@
 """验证 Streamlit 展示真实执行状态和 Git 派生数据可用性。"""
 
+from collections.abc import Hashable
 from pathlib import Path
+from typing import Literal, Protocol
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -10,20 +12,30 @@ from repopath.analyzer.git_analyzer import GitAnalyzer
 from repopath.analyzer.python import PythonAnalyzer
 from repopath.core.service import analyze_repository
 from repopath.model.options import AnalysisOptions
+from repopath.model.report import RepositoryReport
 
 FIXTURE = Path(__file__).parent / "fixtures" / "mixed_repo"
 
 
-def _render_status_report(report: object) -> None:
-    """为 AppTest 提供独立且无需后台任务的实际报告页面。"""
-    from typing import cast
+class _RecordTable(Protocol):
+    """限定测试读取 DataFrame 记录时使用的接口。"""
 
+    def to_dict(
+        self, orient: Literal["records"], *, into: dict[Hashable, object],
+    ) -> list[dict[Hashable, object]]: ...
+
+
+def _record_rows(table: _RecordTable) -> list[dict[Hashable, object]]:
+    """读取真实表格记录，并保留字段校验前的通用单元格类型。"""
+    return table.to_dict(orient="records", into=dict[Hashable, object]())
+
+
+def _render_status_report(report: "RepositoryReport") -> None:
+    """为 AppTest 提供独立且无需后台任务的实际报告页面。"""
     import streamlit as st
 
     from repopath.interface.ui.views import render_report
-    from repopath.model.report import RepositoryReport
-
-    render_report(cast(RepositoryReport, report), st)
+    render_report(report, st)
 
 
 def test_ui_disabled_analyzers_do_not_display_empty_results() -> None:
@@ -109,7 +121,8 @@ def test_ui_missing_git_keeps_reading_and_marks_scores_unavailable(
     scores = next(
         item.value for item in app.dataframe if "变更关注度" in item.value.columns
     )
-    assert set(scores["Git"]) == {"未计算"}
-    assert set(scores["变更关注度"]) == {"未计算"}
+    score_rows = _record_rows(scores)
+    assert {row["Git"] for row in score_rows} == {"未计算"}
+    assert {row["变更关注度"] for row in score_rows} == {"未计算"}
     assert any("变更关注度：未计算" in item.value for item in app.markdown)
     assert any("git failed" in item.value for item in app.info)

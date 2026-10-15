@@ -164,10 +164,10 @@ def render_application(
                 key=f"include-file-list:{source_key}",
             )
             reading_enabled = st.checkbox(
-                "试验性阅读指南",
+                "实验性阅读指南",
                 value=configured_options.reading_enabled,
                 help=(
-                    "按文档与源码证据整理阅读片段，保留来源和未知项。"
+                    "仅整理文档和源码线索，不保证能解释项目用途或阅读价值。"
                     "独立于分析模式，不要求 Git 历史或依赖图。"
                 ),
                 key=f"reading-enabled:{source_key}",

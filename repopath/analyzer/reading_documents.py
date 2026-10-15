@@ -1,17 +1,14 @@
 """从 Markdown 和静态清单提取显式导航，不执行清单中的代码。"""
 
-import json
 import re
 
-import tomllib
-
 from ..model.reading import ReadingEvidence
+from .reading_manifest import is_manifest_array, load_manifest, manifest_fields
+from .reading_orientation import document_goal, prose
 from .reading_support import MAX_FACTS, Anchor, ReadingCollector
 
 _HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.+?)(?:\s+#+)?\s*$")
-_LINK = re.compile(
-    r"(?<!!)\[[^\]\n]+\]\(\s*(<[^>\n]+>|[^\s)]+)(?:\s+[^)]*)?\)"
-)
+_LINK = re.compile(r"(?<!!)\[[^\]\n]+\]\(\s*(<[^>\n]+>|[^\s)]+)(?:\s+[^)]*)?\)")
 _REFERENCE = re.compile(r"^ {0,3}\[[^\]\n]+\]:\s*(<[^>\n]+>|\S+)")
 _LINE = re.compile(r"L?(\d+)(?:-L?(\d+))?$", re.IGNORECASE)
 _FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
@@ -19,8 +16,16 @@ _INLINE_CODE = re.compile(r"(`+).*?\1")
 
 
 def collect_documents(collector: ReadingCollector) -> None:
-    """所有 Markdown 文件采用同一规则，不依赖约定目录或项目名称。"""
-    for path in sorted(collector.paths):
+    """沿项目说明中的链接展开；没有说明入口时保留独立文档导航。"""
+    pending = sorted(collector.primary_documents) or sorted(
+        path for path in collector.paths if path.lower().endswith(".md")
+    )
+    visited: set[str] = set()
+    while pending:
+        path = pending.pop(0)
+        if path in visited:
+            continue
+        visited.add(path)
         if not path.lower().endswith(".md"):
             continue
         source = collector.read(path)
@@ -69,10 +74,28 @@ def collect_documents(collector: ReadingCollector) -> None:
         topic = f"文档：{path}"
         for index, (line, title) in enumerate(headings):
             end = (
-                headings[index + 1][0] - 1
-                if index + 1 < len(headings)
-                else len(lines)
+                headings[index + 1][0] - 1 if index + 1 < len(headings) else len(lines)
             )
+            goal = document_goal(title)
+            number, description = prose(lines, line, end)
+            if (
+                path in collector.primary_documents
+                and index == 0
+                and description
+                and goal == "document"
+            ):
+                goal = "overview"
+            elif (
+                goal in {"purpose", "structure"}
+                and path not in collector.primary_documents
+            ):
+                goal = "component"
+            if (
+                collector.overview_paths
+                and path not in collector.overview_paths
+                and goal == "document"
+            ):
+                continue
             location = collector.location(path, line, end)
             evidence = ReadingEvidence(
                 "document_section",
@@ -83,17 +106,63 @@ def collect_documents(collector: ReadingCollector) -> None:
                 topic=topic,
                 kind="document",
                 question="文档如何介绍？",
-                summary=f"作者说明：“{title[:160]}”",
+                summary=f"文档章节：“{title[:160]}”",
                 location=location,
                 evidence=(evidence,),
                 confidence="documented",
+                goal=goal,
+                reason=(
+                    "章节标题匹配介绍或功能类关键词。"
+                    if goal == "purpose"
+                    else "章节标题匹配结构或设计类关键词。"
+                    if goal == "structure"
+                    else "章节标题匹配用法或示例类关键词。"
+                    if goal == "usage"
+                    else "此处存在文档章节。"
+                ),
+                learn=f"查看“{title[:160]}”原文"
+                + ("：" + description[:180] if description else "。"),
             )
+            if (
+                goal == "structure"
+                and len(collector.guide.structure) < 3
+                and description
+            ):
+                collector.guide.structure.append(
+                    ReadingEvidence(
+                        "document_structure",
+                        collector.location(path, number),
+                        description,
+                    )
+                )
+            if (
+                goal == "purpose"
+                and index > 0
+                and description
+                and path in collector.primary_documents
+                and not any(
+                    item.kind == "document_purpose" for item in collector.guide.purpose
+                )
+            ):
+                collector.guide.purpose.insert(
+                    0,
+                    ReadingEvidence(
+                        "document_purpose",
+                        collector.location(path, number),
+                        description,
+                    ),
+                )
+                collector.guide.purpose = collector.guide.purpose[:2]
         for line, target in links:
             collector.check_cancelled()
+            if document_goal(lines[line - 1]) == "maintenance":
+                continue
             resolved = collector.resolve(path, target)
             if resolved is None:
                 continue
             destination, fragment = resolved
+            if destination.lower().endswith(".md") and destination not in visited:
+                pending.append(destination)
             source_location = collector.location(path, line, line)
             evidence = ReadingEvidence(
                 "document_link", source_location, "文档中的本地链接。"
@@ -136,15 +205,18 @@ def collect_documents(collector: ReadingCollector) -> None:
                         end_line=target_end,
                     )
                 )
+            if destination.lower().endswith(".md"):
+                continue
             collector.add(
                 topic=topic,
                 kind="document",
                 question="文档指向哪里？",
                 summary="文档链接指向此文件。",
-                location=collector.location(
-                    destination, target_line, target_end
-                ),
+                location=collector.location(destination, target_line, target_end),
                 evidence=(evidence,),
+                goal="usage"
+                if document_goal(lines[line - 1]) == "usage"
+                else "implementation",
             )
 
 
@@ -158,9 +230,7 @@ def _value_line(source: str, value: str) -> int:
     )
 
 
-def _module_paths(
-    collector: ReadingCollector, manifest: str, module: str
-) -> list[str]:
+def _module_paths(collector: ReadingCollector, manifest: str, module: str) -> list[str]:
     """按完整模块后缀找候选，不假定 src 布局或求值构建配置。"""
     directory = manifest.rsplit("/", 1)[0] + "/" if "/" in manifest else ""
     suffixes = (
@@ -205,9 +275,7 @@ def _manifest_target(
             r"([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*):([A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)",
             target,
         )
-        targets = (
-            _module_paths(collector, path, match.group(1)) if match else []
-        )
+        targets = _module_paths(collector, path, match.group(1)) if match else []
         symbol = match.group(2) if match else ""
         if not match:
             collector.gap(
@@ -217,9 +285,7 @@ def _manifest_target(
             )
     else:
         if any(character in target for character in "*?{"):
-            collector.gap(
-                "unsupported_entry", "清单包含通配或模板路径，未展开。", path
-            )
+            collector.gap("unsupported_entry", "清单包含通配或模板路径，未展开。", path)
             targets = []
         else:
             resolved = collector.resolve(path, target)
@@ -254,7 +320,7 @@ def _manifest_target(
 
 def collect_manifests(collector: ReadingCollector) -> None:
     """只读取受限字段；忽略安装脚本、依赖下载和动态配置。"""
-    for path in sorted(collector.paths):
+    for path in sorted(collector.paths, key=lambda p: (p.count("/"), p)):
         name = path.rsplit("/", 1)[-1]
         if name not in {"pyproject.toml", "package.json"}:
             continue
@@ -262,10 +328,8 @@ def collect_manifests(collector: ReadingCollector) -> None:
         if source is None:
             continue
         try:
-            data = (
-                tomllib.loads(source)
-                if name == "pyproject.toml"
-                else json.loads(source)
+            data = manifest_fields(
+                load_manifest(source, toml=name == "pyproject.toml")
             )
         except (ValueError, RecursionError):
             collector.gap(
@@ -274,18 +338,16 @@ def collect_manifests(collector: ReadingCollector) -> None:
                 path,
             )
             continue
-        if not isinstance(data, dict):
-            collector.gap(
-                "invalid_manifest", "清单顶层不是对象，未推断入口。", path
-            )
+        if data is None:
+            collector.gap("invalid_manifest", "清单顶层不是对象，未推断入口。", path)
             continue
         if name == "pyproject.toml":
-            project = data.get("project", {})
-            if not isinstance(project, dict):
+            project = manifest_fields(data.get("project"))
+            if project is None:
                 continue
             for field in ("scripts", "gui-scripts"):
-                entries = project.get(field, {})
-                if not isinstance(entries, dict):
+                entries = manifest_fields(project.get(field))
+                if entries is None:
                     continue
                 for command, target in entries.items():
                     collector.check_cancelled()
@@ -300,7 +362,7 @@ def collect_manifests(collector: ReadingCollector) -> None:
                         )
         else:
             count = 0
-            pending = [
+            pending: list[tuple[str, object, int]] = [
                 (field, data[field], 0)
                 for field in ("main", "module", "types", "bin", "exports")
                 if field in data
@@ -317,13 +379,15 @@ def collect_manifests(collector: ReadingCollector) -> None:
                     continue
                 if isinstance(value, str):
                     _manifest_target(collector, path, source, field, value)
-                elif isinstance(value, dict):
-                    pending.extend(
-                        (f"{field}.{key}", item, depth + 1)
-                        for key, item in value.items()
-                    )
-                elif isinstance(value, list):
+                elif is_manifest_array(value):
                     pending.extend(
                         (f"{field}[{index}]", item, depth + 1)
                         for index, item in enumerate(value)
                     )
+                else:
+                    fields = manifest_fields(value)
+                    if fields is not None:
+                        pending.extend(
+                            (f"{field}.{key}", item, depth + 1)
+                            for key, item in fields.items()
+                        )

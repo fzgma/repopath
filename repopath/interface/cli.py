@@ -169,7 +169,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="reading_enabled",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="开启试验性阅读指南，按来源证据提供片段与关联（默认关闭）",
+        help="开启实验性阅读指南，仅提供文档和源码线索，不保证阅读价值（默认关闭）",
     )
     return parser
 

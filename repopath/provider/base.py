@@ -17,7 +17,7 @@ class RepositoryFileProvider(Protocol):
         ...
 
     def read_text(self, path: Path) -> str | None:
-        """读取文本文件并在不可读取时返回空值。"""
+        """读取可分析文本；非文本、编码不支持、超限或不可读时返回空值。"""
         ...
 
 

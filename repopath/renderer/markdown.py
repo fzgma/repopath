@@ -4,7 +4,7 @@ import re
 from collections import Counter
 from html import escape
 
-from ..model.file import FileRecord
+from ..model.file import FILE_STATISTICS_SCOPE, FileRecord
 from ..model.report import RepositoryReport
 from ..model.result import AnalyzerName, AnalyzerStatus
 from .reading import (
@@ -86,6 +86,8 @@ class MarkdownRenderer:
             f"{report.schema_version}",
             "",
             "## 概览",
+            "",
+            FILE_STATISTICS_SCOPE,
             "",
             f"- 文件数：{len(files)}",
             f"- 非空行数：{stats.total_non_empty_lines}",
@@ -632,6 +634,8 @@ class MarkdownRenderer:
             "",
             "## 概览",
             "",
+            FILE_STATISTICS_SCOPE,
+            "",
             f"- 文件数：{len(report.files)}",
             f"- 非空行数：{stats.total_non_empty_lines}",
             f"- 识别语言：{len(stats.language_counts)}",
@@ -734,8 +738,9 @@ class MarkdownRenderer:
         result = report.analyzer_result(AnalyzerName.READING)
         limit = reading_detail_limit(report)
         lines.extend([
-            "", "## 阅读指南（试验）", "",
-            f"状态：`{result.status}` · {len(guide.steps)} 步"
+            "", "## 阅读指南（实验）", "",
+            READING_BOUNDARY, "",
+            f"状态：`{result.status}` · {len(guide.steps)} 条线索"
             + (" · 已截断" if guide.truncated else ""),
         ])
         if result.reason:
@@ -748,12 +753,29 @@ class MarkdownRenderer:
             MarkdownRenderer._append_reading_omission(lines, len(messages), limit, label)
         if result.status == AnalyzerStatus.NOT_RUN:
             return
-        lines.extend(["", READING_BOUNDARY, ""])
+        lines.extend(["", "### 1. 项目说明摘录", ""])
+        for item in guide.purpose:
+            lines.append(f"- 原文摘录：{_reading_text(item.description)}（{_reading_text(format_location(item.location))}）")
+        if not guide.purpose:
+            lines.append("未提取到项目说明片段。")
+        lines.extend(["", "### 2. 组成线索", ""])
+        for item in guide.structure:
+            lines.append(f"- 原文摘录：{_reading_text(item.description)}（{_reading_text(format_location(item.location))}）")
+        if guide.components:
+            lines.extend(["", "| 路径 | 说明摘录或结构记录 | 来源 |", "| --- | --- | --- |"])
+            for item in guide.components:
+                lines.append(markdown_row(
+                    _reading_text(item.path), _reading_text(item.summary),
+                    _reading_text(format_location(item.location)),
+                ))
+        elif not guide.structure:
+            lines.append("未提取到组成说明或目录、包边界。")
+        lines.extend(["", "### 3. 阅读线索", ""])
         if detail == "summary":
             if guide.steps:
                 lines.extend([
-                    "| 位置 | 阅读线索 | 依据 |",
-                    "| --- | --- | --- |",
+                    "| 位置 | 内容 | 列出依据 | 可核对内容 |",
+                    "| --- | --- | --- | --- |",
                 ])
             for step in guide.steps[:READING_STEP_LIMIT]:
                 confidence = CONFIDENCE_LABELS.get(step.confidence, step.confidence)
@@ -761,28 +783,33 @@ class MarkdownRenderer:
                 lines.append(markdown_row(
                     _reading_text(format_location(step.location)),
                     _reading_text(step.summary),
-                    _reading_text(f"{kind} · {confidence}"),
+                    _reading_text(step.reason or f"{kind} · {confidence}"),
+                    _reading_text(step.learn or step.question),
                 ))
-            MarkdownRenderer._append_reading_omission(lines, len(guide.steps), READING_STEP_LIMIT, "步骤")
+            MarkdownRenderer._append_reading_omission(lines, len(guide.steps), READING_STEP_LIMIT, "线索")
             if guide.gaps:
                 counts = Counter(GAP_LABELS.get(gap.kind, gap.kind) for gap in guide.gaps)
                 labels = [f"{kind} ×{count}" for kind, count in counts.items()]
                 lines.extend(["", "限制：" + _reading_text("；".join(labels[:limit])) + "。"])
                 MarkdownRenderer._append_reading_omission(lines, len(labels), limit, "限制类别")
             lines.extend([
-                "", "来源、片段和限制详情：CLI 使用 `--detail full`，UI 展开“依据与片段”和“分析说明”。JSON 保存本次保留的计划与证据。",
+                "", "来源、片段和限制详情：CLI 使用 `--detail full`，UI 展开“依据与片段”和“分析说明”。JSON 保存本次保留的线索与依据。",
             ])
             return
         for index, step in enumerate(guide.steps[:READING_STEP_LIMIT], start=1):
             confidence = CONFIDENCE_LABELS.get(step.confidence, step.confidence)
             kind = KIND_LABELS.get(step.kind, step.kind)
             lines.extend([
-                "", f"### 步骤 {index}：{_reading_text(step.question)}", "",
+                "", f"### 线索 {index}：{_reading_text(step.question)}", "",
                 f"{_reading_text(step.summary)}（{_reading_text(kind)} · {_reading_text(confidence)}）",
                 "",
                 f"- 位置：{_reading_text(format_location(step.location))}",
                 f"- 主题：{_reading_text(step.topic)}",
             ])
+            if step.reason:
+                lines.append(f"- 列出依据：{_reading_text(step.reason)}")
+            if step.learn:
+                lines.append(f"- 可核对内容：{_reading_text(step.learn)}")
             if not step.evidence:
                 lines.append("- 没有附带证据记录，需返回原文核对。")
             for evidence in step.evidence[:limit]:
@@ -799,7 +826,7 @@ class MarkdownRenderer:
             for location in unique_preview_locations(step, limit):
                 lines.extend(["", f"片段：{_reading_text(format_location(location))}"])
                 lines.extend(_reading_preview(location.excerpt))
-        MarkdownRenderer._append_reading_omission(lines, len(guide.steps), READING_STEP_LIMIT, "步骤")
+        MarkdownRenderer._append_reading_omission(lines, len(guide.steps), READING_STEP_LIMIT, "线索")
         lines.extend([
             "", "### 分析说明", "",
             f"扫描 {guide.scanned_files} 个文件，{guide.candidate_count} 个候选。",
@@ -958,6 +985,14 @@ class MarkdownRenderer:
                         if line == "## 变更关注模块"
                         else report.analyzer_result(name)
                     )
+                    if report.options.reading_enabled:
+                        line = {
+                            "## 推荐阅读": "## 结构统计（旧排序）",
+                            "## 推荐阅读顺序": "## 结构统计（旧排序）",
+                            "## Python 核心模块": "## Python 规模与引用统计",
+                            "## Python 核心模块候选": "## Python 规模与引用统计",
+                            "## 模块评分": "## 结构指标评分",
+                        }.get(line, line)
                     output.extend([line, "", f"- 分析状态：{labels[result.status]}（`{result.status}`）"])
                     if result.reason:
                         output.append(f"- 原因：{markdown_cell(result.reason)}")

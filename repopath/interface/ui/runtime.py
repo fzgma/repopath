@@ -1,10 +1,11 @@
 """Streamlit 分析任务的后台线程运行时。"""
 
 from collections.abc import Callable, MutableMapping
+from dataclasses import replace
 from pathlib import Path
 from threading import Lock, Thread
 from time import perf_counter
-from typing import Any, Protocol
+from typing import Protocol, TypedDict, Unpack
 from uuid import uuid4
 
 from ...core.control import AnalysisCancelled, CancellationToken
@@ -12,7 +13,7 @@ from ...model.options import AnalysisOptions
 from ...model.report import RepositoryReport
 from ...model.repository import RepositorySource
 from ...model.result import AnalysisProgress
-from .state import AnalysisSnapshot, UiRunState, classify_error
+from .state import AnalysisSnapshot, UiError, UiRunState, classify_error
 
 
 class AnalyzeRepository(Protocol):
@@ -31,6 +32,17 @@ class AnalyzeRepository(Protocol):
     ) -> RepositoryReport:
         """执行一次可取消的仓库分析。"""
         ...
+
+
+class _SnapshotChanges(TypedDict, total=False):
+    """限定后台任务可以更新的快照字段及其类型。"""
+
+    state: UiRunState
+    current_stage: str
+    progress_percent: int
+    report: RepositoryReport | None
+    error: UiError | None
+    elapsed_seconds: float | None
 
 
 class AnalysisRuntime:
@@ -180,20 +192,19 @@ class AnalysisRuntime:
                 progress_percent=event.percent,
             )
 
-    def _update_job(self, job_id: str, **changes: object) -> None:
+    def _update_job(
+        self, job_id: str, **changes: Unpack[_SnapshotChanges]
+    ) -> None:
         """仅在任务编号仍匹配时原子更新运行快照。"""
         with self._lock:
             if self._snapshot.job_id == job_id:
                 self._snapshot = self._replace_snapshot(**changes)
 
-    def _replace_snapshot(self, **changes: object) -> AnalysisSnapshot:
+    def _replace_snapshot(
+        self, **changes: Unpack[_SnapshotChanges]
+    ) -> AnalysisSnapshot:
         """以当前快照为基础创建字段更新后的新快照。"""
-        values = {
-            name: getattr(self._snapshot, name)
-            for name in self._snapshot.__dataclass_fields__
-        }
-        values.update(changes)
-        return AnalysisSnapshot(**values)
+        return replace(self._snapshot, **changes)
 
     def _is_thread_alive(self) -> bool:
         """返回当前工作线程是否仍然存活。"""
@@ -204,7 +215,7 @@ _RUNTIME_KEY = "repopath.analysis_runtime"
 
 
 def get_analysis_runtime(
-    session_state: MutableMapping[str, Any],
+    session_state: MutableMapping[str, object],
     analyze: AnalyzeRepository,
 ) -> AnalysisRuntime:
     """获取当前 Streamlit 会话独享的分析运行时。"""

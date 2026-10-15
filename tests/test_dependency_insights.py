@@ -47,14 +47,17 @@ def test_scores_are_split_into_navigation_and_change_attention(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """验证两类聚合分数使用各自的组成项。"""
-    monkeypatch.setattr(
-        GitProvider,
-        "summary",
-        lambda *args: GitSummary(
+    def summary(provider: GitProvider, period: str = "all") -> GitSummary:
+        return GitSummary(
             available=True,
             changed_paths=Counter({"entry.py": 3}),
             recent_90_days=Counter({"entry.py": 2}),
-        ),
+        )
+
+    monkeypatch.setattr(
+        GitProvider,
+        "summary",
+        summary,
     )
     report = analyze_repository(FIXTURE_ROOT)
 

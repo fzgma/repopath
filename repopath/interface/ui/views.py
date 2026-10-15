@@ -5,9 +5,11 @@ from collections.abc import Callable, Iterable, Sequence
 from heapq import nsmallest
 from itertools import islice
 from math import ceil
+from pathlib import Path
 from typing import Any, TypeAlias, TypeVar
 
 from ...model.dependency import DependencyEdge
+from ...model.file import FILE_STATISTICS_SCOPE
 from ...model.git import FileChangeStats
 from ...model.reading import ReadingLocation, ReadingStep
 from ...model.report import RepositoryReport
@@ -80,10 +82,10 @@ def _metric_value(
 
 def _entry_metric(report: RepositoryReport) -> tuple[str, int | str, str]:
     """合并已完成的语言入口证据，保留部分成功并注明缺失来源。"""
-    paths = set()
+    paths: set[Path] = set()
     completed = 0
-    statuses = []
-    details = []
+    statuses: list[AnalyzerStatus] = []
+    details: list[str] = []
     for name, label, entries in (
         (AnalyzerName.PYTHON, "Python", report.python.entry_points),
         (AnalyzerName.CPP, "C++", report.cpp.entry_points),
@@ -174,14 +176,15 @@ def render_report(
         metrics, values, strict=True
     ):
         column.metric(label, value, help=help_text)
+    st.caption(FILE_STATISTICS_SCOPE)
     _render_messages(report, st)
     _render_analysis_scope_hint(report, st)
     view = st.segmented_control(
         "报告视图",
         [
             "概览",
-            "推荐阅读",
-            "阅读指南（试验）",
+            "结构统计" if report.options.reading_enabled else "推荐阅读",
+            "阅读指南（实验）",
             "依赖关系",
             "Python",
             "C++",
@@ -195,9 +198,9 @@ def render_report(
     match view:
         case "概览":
             _render_overview(report, st)
-        case "推荐阅读":
+        case "推荐阅读" | "结构统计":
             _render_reading(report, st)
-        case "阅读指南（试验）":
+        case "阅读指南（实验）":
             _render_reading_guide(report, st)
         case "依赖关系":
             _render_dependencies(report, st)
@@ -250,7 +253,7 @@ def _render_analysis_scope_hint(
         if options.profile != "deep":
             st.info(
                 "切换到“深度”模式后重新分析，可生成依赖与统计推荐结果。"
-                "试验性阅读指南由独立开关控制。"
+                "实验性阅读指南由独立开关控制。"
             )
 
 
@@ -386,15 +389,35 @@ def _render_reading_guide(
     report: RepositoryReport, st: StreamlitApi
 ) -> None:
     """展示共用报告中的阅读证据，不再访问本地或远程仓库文件。"""
-    st.subheader("阅读指南（试验）")
+    st.subheader("阅读指南（实验）")
+    st.caption(READING_BOUNDARY)
     result = report.analyzer_result(AnalyzerName.READING)
     if not result.successful:
         _render_analyzer_status(report, AnalyzerName.READING, st)
     if result.status == AnalyzerStatus.NOT_RUN:
         return
     guide = report.reading_guide
+    st.subheader("1. 项目说明摘录")
+    for item in guide.purpose:
+        st.text(f"原文摘录：{item.description}")
+        st.caption(format_location(item.location))
+    if not guide.purpose:
+        st.info("未提取到项目说明片段。")
+    st.subheader("2. 组成线索")
+    for item in guide.structure:
+        st.text(f"原文摘录：{item.description}")
+        st.caption(format_location(item.location))
+    if guide.components:
+        st.dataframe([
+            {"路径": item.path, "说明摘录或结构记录": item.summary,
+             "来源": format_location(item.location)}
+            for item in guide.components
+        ], width="stretch", hide_index=True)
+    elif not guide.structure:
+        st.info("未提取到组成说明或目录、包边界。")
+    st.subheader("3. 阅读线索")
     state = reading_state(report)
-    limits = []
+    limits: list[str] = []
     if guide.gaps:
         limits.append(f"缺口 {len(guide.gaps)} 项")
     if guide.truncated:
@@ -413,9 +436,8 @@ def _render_reading_guide(
             render(message)
         _reading_limit_hint(st, len(messages), detail_limit)
     with st.expander("分析说明", expanded=False):
-        st.caption(READING_BOUNDARY)
         metrics = st.columns(3)
-        metrics[0].metric("阅读步骤", len(guide.steps))
+        metrics[0].metric("阅读线索", len(guide.steps))
         metrics[1].metric("候选片段", guide.candidate_count)
         metrics[2].metric("扫描文件", guide.scanned_files)
         if guide.capabilities:
@@ -431,7 +453,7 @@ def _render_reading_guide(
                     + (f"（{gap.path}）" if gap.path else "")
                 )
             _reading_limit_hint(st, len(guide.gaps), detail_limit)
-        st.caption("已保留的计划与证据可在“报告”视图下载。")
+        st.caption("已保留的线索与依据可在“报告”视图下载。")
     if not guide.steps:
         return
     topics = list(dict.fromkeys(step.topic for step in guide.steps))
@@ -472,6 +494,10 @@ def _render_reading_guide(
             f"{index}. {format_location(step.location)}\n"
             f"{step.summary}（{kind} · {confidence}）"
         )
+        if step.reason:
+            st.text(f"列出依据：{step.reason}")
+        if step.learn:
+            st.text(f"可核对内容：{step.learn}")
         with st.expander(f"依据与片段 · {index}", expanded=False):
             _render_reading_step(step, st, detail_limit)
 
@@ -482,7 +508,7 @@ def _render_reading_step(
     """显示片段、依据和候选关联，保留每项事实的来源。"""
     confidence = CONFIDENCE_LABELS.get(step.confidence, step.confidence)
     st.text(f"{step.question}\n主题：{step.topic}")
-    st.text(f"证据状态：{confidence}（{step.confidence}）")
+    st.text(f"依据类型：{confidence}")
     if step.evidence:
         st.caption("依据")
         for evidence in step.evidence[:detail_limit]:
@@ -524,6 +550,8 @@ def _render_reading(report: RepositoryReport, st: StreamlitApi) -> None:
     """展示筛选后的阅读路线、评分明细和模块详情。"""
     if not _render_analyzer_status(report, AnalyzerName.INSIGHTS, st):
         return
+    if report.options.reading_enabled:
+        st.caption("这里保留基于规模、引用和入口的结构统计。文档与源码线索见“阅读指南（实验）”。")
     all_items = report.insights.reading_order
     reading_limit = report.options.reading_limit
     filters = st.columns(4)

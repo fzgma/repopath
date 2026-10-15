@@ -1,0 +1,4 @@
+[project]
+name = "text-conversion"
+description = "Convert a sequence of words into a single value."
+readme = "overview.md"

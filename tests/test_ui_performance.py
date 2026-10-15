@@ -1,12 +1,13 @@
 """Streamlit 视图数据限量和报告缓存测试。"""
 
-from typing import cast
+from pathlib import Path
 
 from repopath.interface.ui.views import (
     _cached_report_text,
     _limited_sorted,
 )
 from repopath.model.report import RepositoryReport
+from repopath.model.repository import Repository
 
 
 class _StreamlitStub:
@@ -26,10 +27,10 @@ def test_limited_sorted_returns_the_same_top_n_order() -> None:
     assert result == [0, 1, 2, 3, 4]
 
 
-def test_cached_report_text_renders_once_per_job() -> None:
+def test_cached_report_text_renders_once_per_job(tmp_path: Path) -> None:
     """验证相同任务编号不会重复生成报告文本。"""
     streamlit = _StreamlitStub()
-    report = cast(RepositoryReport, object())
+    report = RepositoryReport(repository=Repository.from_path(tmp_path))
     calls = 0
 
     def render(_: RepositoryReport) -> str:
@@ -49,10 +50,10 @@ def test_cached_report_text_renders_once_per_job() -> None:
     assert calls == 1
 
 
-def test_cached_report_text_keeps_detail_formats_separate() -> None:
+def test_cached_report_text_keeps_detail_formats_separate(tmp_path: Path) -> None:
     """同一任务切换摘要、完整和 JSON 时不串内容，仅淘汰旧任务。"""
     streamlit = _StreamlitStub()
-    report = cast(RepositoryReport, object())
+    report = RepositoryReport(repository=Repository.from_path(tmp_path))
     calls: list[str] = []
 
     def render_format(format_name: str, job: str = "job-1") -> str:

@@ -1,8 +1,5 @@
 """RepoPath Streamlit 根目录入口。"""
 
-from importlib import import_module
-from typing import Any, cast
-
 from repopath.core.config import (
     ensure_default_config,
     load_analysis_options,
@@ -20,7 +17,7 @@ from repopath.interface.ui import (
 def main() -> None:
     """配置 Streamlit 页面并交给 UI 包执行交互流程。"""
     try:
-        st = cast(Any, import_module("streamlit"))
+        import streamlit as st
     except ModuleNotFoundError as exc:
         raise SystemExit(
             "缺少 Streamlit，请先执行："

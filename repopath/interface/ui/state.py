@@ -1,8 +1,8 @@
 """Streamlit 会话运行状态。"""
 
+from collections.abc import MutableMapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, MutableMapping
 
 from ...model.options import AnalysisOptions
 from ...model.report import RepositoryReport
@@ -59,7 +59,7 @@ _RATE_LIMIT_KEY = "repopath.github_rate_limit"
 
 
 def get_github_rate_limit(
-    session_state: MutableMapping[str, Any],
+    session_state: MutableMapping[str, object],
 ) -> GitHubRateLimit | None:
     """从会话状态读取最近一次 GitHub 额度查询结果。"""
     rate_limit = session_state.get(_RATE_LIMIT_KEY)
@@ -69,7 +69,7 @@ def get_github_rate_limit(
 
 
 def save_github_rate_limit(
-    session_state: MutableMapping[str, Any],
+    session_state: MutableMapping[str, object],
     rate_limit: GitHubRateLimit,
 ) -> None:
     """保存最近一次 GitHub 额度查询结果。"""
@@ -77,7 +77,7 @@ def save_github_rate_limit(
 
 
 def clear_github_rate_limit(
-    session_state: MutableMapping[str, Any],
+    session_state: MutableMapping[str, object],
 ) -> None:
     """清除上一次 GitHub 额度查询结果。"""
     session_state.pop(_RATE_LIMIT_KEY, None)

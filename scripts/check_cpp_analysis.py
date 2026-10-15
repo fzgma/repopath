@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from io import TextIOWrapper
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +92,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stderr.reconfigure(encoding="utf-8")
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
     raise SystemExit(main())

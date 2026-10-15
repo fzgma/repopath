@@ -1,6 +1,6 @@
 """导读分析共用的读取边界、证据位置和公平选择。"""
 
-from collections import defaultdict, deque
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -13,7 +13,8 @@ from ..model.reading import (
     ReadingLocation,
     ReadingStep,
 )
-from ..model.result import AnalysisState
+from ..model.result import AnalysisState, AnalyzerName
+from .reading_plan import explain, priority, select_steps
 
 MAX_FILES = 512
 MAX_FILE_BYTES = 256 * 1024
@@ -44,6 +45,12 @@ class ReadingCollector:
     def __init__(self, context: AnalysisContext, state: AnalysisState) -> None:
         """建立已扫描路径索引及一次运行内的文本、位置缓存。"""
         self.context = context
+        python_result = state.results.get(AnalyzerName.PYTHON)
+        self.python_available = bool(
+            context.options.python_enabled
+            and python_result
+            and python_result.successful
+        )
         self.root = context.repository.root.resolve()
         self.guide = ReadingGuide()
         self.paths: dict[str, Path] = {}
@@ -51,10 +58,10 @@ class ReadingCollector:
         self._lines: dict[str, list[str]] = {}
         self.candidates: dict[tuple[str, str, int, str, str], ReadingStep] = {}
         self.anchors: list[Anchor] = []
+        self.overview_paths: set[str] = set()
+        self.primary_documents: set[str] = set()
         self.anchors_by_path: dict[str, list[Anchor]] = defaultdict(list)
-        self._anchor_keys: set[
-            tuple[str, str, str, int | None, int | None]
-        ] = set()
+        self._anchor_keys: set[tuple[str, str, str, int | None, int | None]] = set()
         self._candidate_counts: dict[str, int] = defaultdict(int)
         self._relations = 0
         self.read_bytes = 0
@@ -90,6 +97,7 @@ class ReadingCollector:
             "related_limit",
             "selection_limit",
             "gap_limit",
+            "component_limit",
         }:
             self.guide.truncated = True
         key = (kind, path)
@@ -117,15 +125,10 @@ class ReadingCollector:
         self.cache[path] = None
         try:
             if not actual.resolve().is_relative_to(self.root):
-                self.gap(
-                    "outside_root", "文件解析后位于仓库外，未读取。", path
-                )
+                self.gap("outside_root", "文件解析后位于仓库外，未读取。", path)
                 return None
             size = actual.stat().st_size
-            if (
-                size > MAX_FILE_BYTES
-                or self.read_bytes + size > MAX_TOTAL_BYTES
-            ):
+            if size > MAX_FILE_BYTES or self.read_bytes + size > MAX_TOTAL_BYTES:
                 self.guide.truncated = True
                 self.gap(
                     "read_budget",
@@ -160,9 +163,7 @@ class ReadingCollector:
         line = min(max(1, line), max(1, len(lines)))
         if end_line is not None:
             end_line = min(max(line, end_line), max(1, len(lines)))
-        stop = min(
-            end_line or line + PREVIEW_LINES - 1, line + PREVIEW_LINES - 1
-        )
+        stop = min(end_line or line + PREVIEW_LINES - 1, line + PREVIEW_LINES - 1)
         excerpt = "\n".join(lines[line - 1 : stop])[:PREVIEW_CHARS]
         return ReadingLocation(path, line, end_line, excerpt)
 
@@ -170,9 +171,7 @@ class ReadingCollector:
         """复用拆行结果，避免同文件多条证据反复遍历整份文本。"""
         if path not in self._lines:
             source = self.read(path)
-            self._lines[path] = (
-                source.splitlines() if source is not None else []
-            )
+            self._lines[path] = source.splitlines() if source is not None else []
         return self._lines[path]
 
     def resolve(self, source: str, target: str) -> tuple[str, str] | None:
@@ -186,9 +185,7 @@ class ReadingCollector:
             return None
         raw = unquote(parsed.path)
         if "\\" in raw or raw.startswith("/") or "\x00" in raw:
-            self.gap(
-                "outside_link", "未跟随绝对路径或非相对路径链接。", source
-            )
+            self.gap("outside_link", "未跟随绝对路径或非相对路径链接。", source)
             return None
         base = Path(source).parent
         parts: list[str] = []
@@ -202,9 +199,7 @@ class ReadingCollector:
                 parts.append(part)
         path = "/".join(parts)
         if path not in self.paths:
-            self.gap(
-                "unresolved_link", "显式链接的目标不在已扫描文件中。", source
-            )
+            self.gap("unresolved_link", "显式链接的目标不在已扫描文件中。", source)
             return None
         return path, unquote(parsed.fragment)
 
@@ -219,12 +214,32 @@ class ReadingCollector:
         evidence: tuple[ReadingEvidence, ...],
         confidence: str = "observed",
         related: tuple[ReadingLocation, ...] = (),
+        reason: str = "",
+        learn: str = "",
+        goal: str = "",
     ) -> None:
         """保存候选；重复事实不会增加候选数量或选择机会。"""
         self.check_cancelled()
         key = (kind, location.path, location.line, topic, summary)
         if key in self.candidates:
             return
+        step = explain(
+            ReadingStep(
+                id=f"{kind}:{location.path}:{location.line}:{summary}",
+                topic=topic,
+                kind=kind,
+                question=question,
+                summary=summary,
+                location=location,
+                confidence=confidence,
+                evidence=evidence,
+                related=related[:6],
+                reason=reason,
+                learn=learn,
+                goal=goal,
+            )
+        )
+        victims = None
         if self._candidate_counts[location.path] >= MAX_FILE_CANDIDATES:
             self.guide.truncated = True
             self.gap(
@@ -232,11 +247,21 @@ class ReadingCollector:
                 "单文件候选达到上限，为其他文件保留分析空间。",
                 location.path,
             )
-            return
-        if len(self.candidates) >= MAX_CANDIDATES:
+            victims = [
+                key
+                for key, item in self.candidates.items()
+                if item.location.path == location.path
+            ]
+        elif len(self.candidates) >= MAX_CANDIDATES:
             self.guide.truncated = True
             self.gap("candidate_budget", "导读候选达到上限，未覆盖全部证据。")
-            return
+            victims = list(self.candidates)
+        if victims:
+            worst = max(victims, key=lambda key: priority(self.candidates[key]))
+            if priority(step) >= priority(self.candidates[worst]):
+                return
+            removed = self.candidates.pop(worst)
+            self._candidate_counts[removed.location.path] -= 1
         self._candidate_counts[location.path] += 1
         if len(related) > 6:
             self.gap(
@@ -244,17 +269,7 @@ class ReadingCollector:
                 "单步仅保留前 6 个关联位置，其余候选未保存，不代表已排除。",
                 location.path,
             )
-        self.candidates[key] = ReadingStep(
-            id=f"{kind}:{location.path}:{location.line}:{len(self.candidates)}",
-            topic=topic,
-            kind=kind,
-            question=question,
-            summary=summary,
-            location=location,
-            confidence=confidence,
-            evidence=evidence,
-            related=related[:6],
-        )
+        self.candidates[key] = step
 
     def anchor(self, anchor: Anchor) -> None:
         """同一来源重复链接不放大目标文件的候选机会。"""
@@ -286,66 +301,54 @@ class ReadingCollector:
         return False
 
     def select(self, limit: int) -> ReadingGuide:
-        """在证据类别、主题和文件间轮询，不按符号数量或热度排序。"""
-        groups: dict[str, dict[str, deque[ReadingStep]]] = defaultdict(dict)
-        candidate_keys: set[tuple[str, str, int, str]] = set()
+        """根据阅读目标及关联证据选择，不把未入选当作分析失败。"""
+        candidates: dict[tuple[str, str, int, str], ReadingStep] = {}
         for step in self.candidates.values():
-            groups[step.kind].setdefault(step.topic, deque()).append(step)
-            candidate_keys.add(
-                (
-                    step.kind,
-                    step.location.path,
-                    step.location.line,
-                    step.summary,
-                )
-            )
-        queues = {
-            kind: deque(deque(values) for values in topics.values())
-            for kind, topics in groups.items()
+            key = (step.kind, step.location.path, step.location.line, step.summary)
+            if key not in candidates or priority(step) < priority(candidates[key]):
+                candidates[key] = step
+        self.guide.candidate_count = len(candidates)
+        anchored = {
+            anchor.path
+            for anchor in self.anchors
+            if not self.primary_documents
+            or anchor.evidence.location.path in self.primary_documents
+            or anchor.evidence.kind == "manifest_entry"
+            and "/" not in anchor.evidence.location.path
+            or anchor.evidence.kind == "source_entry"
         }
-        selected: set[tuple[str, str, int, str]] = set()
-        used_paths: dict[str, int] = defaultdict(int)
-        kinds = [
-            kind
-            for kind in ("document", "interface", "definition", "usage")
-            if kind in queues
-        ]
-        while kinds and len(self.guide.steps) < limit:
-            self.check_cancelled()
-            for kind in kinds[:]:
-                topics = queues[kind]
-                # 每轮优先尚未出现的目标文件；排序仅稳定展示，不表示价值高低。
-                if topics:
-                    minimum = min(
-                        used_paths[items[0].location.path] for items in topics
-                    )
-                    while used_paths[topics[0][0].location.path] != minimum:
-                        topics.rotate(-1)
-                items = topics.popleft()
-                step = items.popleft()
-                key = (
-                    step.kind,
-                    step.location.path,
-                    step.location.line,
-                    step.summary,
-                )
-                if key not in selected:
-                    selected.add(key)
-                    used_paths[step.location.path] += 1
-                    self.guide.steps.append(step)
-                if items:
-                    topics.append(items)
-                if not topics:
-                    kinds.remove(kind)
-                if len(self.guide.steps) >= limit:
-                    break
-        # 同一片段被多个主题引用只算一个候选；去重不属于预算截断。
-        self.guide.candidate_count = len(candidate_keys)
-        if self.guide.candidate_count > len(self.guide.steps):
-            self.gap(
-                "selection_limit",
-                "按类别和主题轮询展示有限步骤；其余候选未显示，不代表不重要。",
+        relevant = [
+            step
+            for step in candidates.values()
+            if (
+                not self.primary_documents or step.goal not in {"document", "component"}
             )
+            and (
+                not self.primary_documents
+                or not anchored
+                or step.goal not in {"contract", "usage", "document"}
+                or step.location.path in anchored
+                or any(location.path in anchored for location in step.related)
+                or step.kind == "document"
+                and step.location.path in self.primary_documents
+            )
+        ]
+        self.guide.steps = select_steps(relevant, limit)
+        grouped_relations: dict[tuple[str, str], set[ReadingLocation]] = defaultdict(
+            set
+        )
+        for step in relevant:
+            if step.kind == "interface":
+                grouped_relations[(step.goal, step.location.path)].update(step.related)
+        for step in self.guide.steps:
+            if step.kind == "interface" and len(
+                grouped_relations[(step.goal, step.location.path)]
+            ) > len(step.related):
+                self.gap(
+                    "related_limit",
+                    "合并后的公开声明仅保留前 6 处关联，其他位置仍需在声明文件中核对。",
+                    step.location.path,
+                )
         if not self.guide.steps:
             self.gap(
                 "no_evidence",

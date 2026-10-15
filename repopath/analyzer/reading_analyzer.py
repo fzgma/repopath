@@ -1,10 +1,11 @@
-"""基于可核查证据生成有限阅读指南，不使用热度或规模推断阅读价值。"""
+"""按静态规则整理实验性阅读线索，不判断业务职责或阅读价值。"""
 
 from ..core.context import AnalysisContext
 from ..model.result import AnalysisResult, AnalysisState, AnalyzerName
 from .base import Analyzer
 from .reading_cpp import collect_cpp
 from .reading_documents import collect_documents, collect_manifests
+from .reading_orientation import collect_orientation
 from .reading_python import collect_python
 from .reading_support import ReadingCollector
 
@@ -22,12 +23,13 @@ class ReadingAnalyzer(Analyzer):
         collector.guide.capabilities.extend(
             [
                 "通用：Markdown 章节、本地链接及 pyproject.toml、package.json 的入口声明。",
-                "按类别、主题和文件交错展示；顺序不表示重要性或运行顺序。",
+                "整理说明摘录、组成线索及源码位置；列出顺序不代表重要性或执行顺序。",
                 "其他语言：仅文档、清单和链接导航。",
             ]
         )
-        collect_documents(collector)
+        collect_orientation(collector)
         collect_manifests(collector)
+        collect_documents(collector)
         collect_python(collector, state)
         collect_cpp(collector, state)
         state.artifacts.reading_guide = collector.select(

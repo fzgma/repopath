@@ -2,13 +2,16 @@
 
 import ast
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from ..model.language import Language
-from ..model.reading import ReadingEvidence
+from ..model.reading import ReadingEvidence, ReadingLocation
 from ..model.result import AnalysisState, AnalyzerName
 from .reading_support import MAX_FACTS, ReadingCollector
+
+PythonDefinition = ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef
+ImportBinding = tuple[str, str, ast.Import | ast.ImportFrom]
 
 
 @dataclass
@@ -17,14 +20,18 @@ class PythonFacts:
 
     path: str
     tree: ast.Module
-    definitions: dict[str, list[ast.AST]] = field(
-        default_factory=lambda: defaultdict(list)
+    definitions: dict[str, list[PythonDefinition]] = field(
+        default_factory=lambda: defaultdict[str, list[PythonDefinition]](
+            list[PythonDefinition]
+        )
     )
-    imports: dict[str, list[tuple[str, str, ast.AST]]] = field(
-        default_factory=lambda: defaultdict(list)
+    imports: dict[str, list[ImportBinding]] = field(
+        default_factory=lambda: defaultdict[str, list[ImportBinding]](
+            list[ImportBinding]
+        )
     )
-    rebound: set[str] = field(default_factory=set)
-    calls: list[ast.Call] = field(default_factory=list)
+    rebound: set[str] = field(default_factory=set[str])
+    calls: list[ast.Call] = field(default_factory=list[ast.Call])
 
 
 def _attribute(node: ast.AST) -> str:
@@ -56,19 +63,13 @@ def _imports(facts: PythonFacts) -> None:
             for alias in node.names:
                 local = alias.asname or alias.name.split(".")[0]
                 # import a.b 在使用处保留完整属性路径，避免把 a 当作 b。
-                module = (
-                    alias.name if alias.asname else alias.name.split(".")[0]
-                )
+                module = alias.name if alias.asname else alias.name.split(".")[0]
                 facts.imports[local].append((module, "", node))
         elif isinstance(node, ast.ImportFrom):
             if node.level and node.level > len(package):
                 continue
-            prefix = (
-                package[: len(package) - node.level + 1] if node.level else []
-            )
-            base = ".".join(
-                prefix + (node.module.split(".") if node.module else [])
-            )
+            prefix = package[: len(package) - node.level + 1] if node.level else []
+            base = ".".join(prefix + (node.module.split(".") if node.module else []))
             for alias in node.names:
                 if alias.name != "*":
                     facts.imports[alias.asname or alias.name].append(
@@ -105,30 +106,22 @@ def _parse(collector: ReadingCollector, path: str) -> PythonFacts | None:
                 path,
             )
             return None
-        if isinstance(
-            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
-        ):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             facts.rebound.add(node.name)
             name = ".".join(scope + (node.name,))
             facts.definitions[name].append(node)
             scope += (node.name,)
-        elif isinstance(node, ast.Name) and isinstance(
-            node.ctx, (ast.Store, ast.Del)
-        ):
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             facts.rebound.add(node.id)
         elif isinstance(node, ast.arg):
             facts.rebound.add(node.arg)
-        elif (
-            isinstance(node, (ast.Import, ast.ImportFrom))
-            and node not in tree.body
-        ):
+        elif isinstance(node, (ast.Import, ast.ImportFrom)) and node not in tree.body:
             for alias in node.names:
                 facts.rebound.add(alias.asname or alias.name.split(".")[0])
         if isinstance(node, ast.Call):
             facts.calls.append(node)
         pending.extend(
-            (child, scope)
-            for child in reversed(list(ast.iter_child_nodes(node)))
+            (child, scope) for child in reversed(list(ast.iter_child_nodes(node)))
         )
     _imports(facts)
     return facts
@@ -138,29 +131,82 @@ def _definition(
     collector: ReadingCollector,
     facts: PythonFacts,
     name: str,
-    node: ast.AST,
+    node: PythonDefinition,
     topic: str,
     evidence: ReadingEvidence,
 ) -> None:
     """将有明确来源的定义转换为共用阅读步骤。"""
     location = collector.location(facts.path, node.lineno, node.end_lineno)
+    evidence_items = [evidence]
+    description = ast.get_docstring(node) or ""
+    if description:
+        document = node.body[0]
+        evidence_items.append(
+            ReadingEvidence(
+                "python_docstring",
+                collector.location(facts.path, document.lineno, document.end_lineno),
+                description.split("\n\n", 1)[0][:240],
+            )
+        )
     collector.add(
         topic=topic,
         kind="definition",
         question="在哪里定义？",
         summary=f"{name} 的定义",
         location=location,
-        evidence=(evidence,),
+        evidence=tuple(evidence_items),
+        learn=f"查看 {name} 的定义。"
+        + (f"注释摘录：{description[:180]}" if description else ""),
     )
+
+
+def _resolve_definition(
+    facts: PythonFacts,
+    name: str,
+    files: dict[str, PythonFacts],
+    modules: dict[str, list[str]],
+    seen: frozenset[tuple[str, str]] = frozenset(),
+) -> tuple[PythonFacts, PythonDefinition] | None:
+    """仅沿唯一的顶层导入追踪最多四层重导出，不求值动态名称。"""
+    key = (facts.path, name)
+    if key in seen or len(seen) >= 4:
+        return None
+    nodes = facts.definitions.get(name, [])
+    if nodes:
+        return (facts, nodes[0]) if len(nodes) == 1 else None
+    bindings = facts.imports.get(name, [])
+    if name in facts.rebound or len(bindings) != 1:
+        return None
+    module, imported, _ = bindings[0]
+    targets = modules.get(module, [])
+    if not imported or len(targets) != 1:
+        return None
+    return _resolve_definition(
+        files[targets[0]], imported, files, modules, seen | {key}
+    )
+
+
+def _export_names(value: ast.expr | None) -> list[str] | None:
+    """仅接受静态字符串列表或元组，不求值动态导出表达式。"""
+    if not isinstance(value, (ast.List, ast.Tuple)):
+        return None
+    names: list[str] = []
+    for item in value.elts:
+        if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
+            return None
+        names.append(item.value)
+    return names
 
 
 def _seed(
     collector: ReadingCollector,
     facts: PythonFacts,
+    files: dict[str, PythonFacts],
+    modules: dict[str, list[str]],
 ) -> set[str]:
     """只由文档字符串、显式导出或外部文档/清单形成阅读依据。"""
     interesting: set[str] = set()
-    topic = f"源码说明：{facts.path}"
+    topic = f"源码位置：{facts.path}"
     if ast.get_docstring(facts.tree):
         node = facts.tree.body[0]
         location = collector.location(facts.path, node.lineno, node.end_lineno)
@@ -172,65 +218,51 @@ def _seed(
             location=location,
             confidence="documented",
             evidence=(
-                ReadingEvidence(
-                    "python_docstring", location, "模块文档字符串。"
-                ),
+                ReadingEvidence("python_docstring", location, "模块文档字符串。"),
             ),
         )
-    for name, nodes in facts.definitions.items():
-        for node in nodes:
-            if not ast.get_docstring(node):
-                continue
-            document = node.body[0]
-            evidence = ReadingEvidence(
-                "python_docstring",
-                collector.location(
-                    facts.path, document.lineno, document.end_lineno
-                ),
-                f"{name} 的文档字符串。",
-            )
-            interesting.add(name)
-            _definition(collector, facts, name, node, topic, evidence)
+    # 只有明确的导出或文档/清单关联才产生接口阅读目标。
     for node in facts.tree.body:
-        targets = (
-            node.targets
-            if isinstance(node, ast.Assign)
-            else [node.target]
-            if isinstance(node, ast.AnnAssign)
-            else []
-        )
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+            value = node.value
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+            value = node.value
+        else:
+            continue
         if not any(
             isinstance(target, ast.Name) and target.id == "__all__"
             for target in targets
         ):
             continue
-        value = node.value
-        if not isinstance(value, (ast.List, ast.Tuple)) or not all(
-            isinstance(item, ast.Constant) and isinstance(item.value, str)
-            for item in value.elts
-        ):
+        names = _export_names(value)
+        if names is None:
             collector.gap(
                 "dynamic_export",
                 "__all__ 并非静态字符串列表，未执行或求值导出规则。",
                 facts.path,
             )
             continue
-        for item in value.elts:
+        for name in names:
             collector.check_cancelled()
-            name = item.value
-            location = collector.location(
-                facts.path, node.lineno, node.end_lineno
-            )
+            location = collector.location(facts.path, node.lineno, node.end_lineno)
             evidence = ReadingEvidence(
                 "python_export", location, f"__all__ 列出 {name}。"
             )
             definitions = facts.definitions.get(name, [])
+            resolved = _resolve_definition(facts, name, files, modules)
             related = tuple(
-                collector.location(
-                    facts.path, target.lineno, target.end_lineno
-                )
+                collector.location(facts.path, target.lineno, target.end_lineno)
                 for target in definitions[:6]
             )
+            if resolved is not None:
+                target_facts, target = resolved
+                related = (
+                    collector.location(
+                        target_facts.path, target.lineno, target.end_lineno
+                    ),
+                )
             if len(definitions) > 6:
                 collector.gap(
                     "related_limit",
@@ -240,21 +272,20 @@ def _seed(
             collector.add(
                 topic=topic,
                 kind="interface",
-                question="显式导出了什么？",
-                summary=f"__all__ 列出 {name}",
+                question="导出列表列出了哪些名称？",
+                summary=f"导出名称：{name}",
                 location=location,
                 evidence=(evidence,),
                 related=related,
             )
-            if len(definitions) == 1:
+            if resolved is not None:
+                target_facts, target = resolved
                 interesting.add(name)
-                _definition(
-                    collector, facts, name, definitions[0], topic, evidence
-                )
+                _definition(collector, target_facts, name, target, topic, evidence)
             else:
                 collector.gap(
                     "unresolved_export",
-                    "部分显式导出未能唯一关联到本文件定义；重导出或动态赋值尚未追踪。",
+                    "部分显式导出无法通过唯一顶层导入关联到定义；可能存在歧义、动态绑定或超出追踪范围。",
                     facts.path,
                 )
     for anchor in collector.anchors_by_path[facts.path]:
@@ -274,14 +305,58 @@ def _seed(
                 )
                 continue
             if anchor.line is not None and (
-                nodes[0].end_lineno < anchor.line
+                (nodes[0].end_lineno or nodes[0].lineno) < anchor.line
                 or nodes[0].lineno > (anchor.end_line or anchor.line)
             ):
                 continue
             interesting.add(name)
-            _definition(
-                collector, facts, name, nodes[0], anchor.topic, anchor.evidence
-            )
+            _definition(collector, facts, name, nodes[0], anchor.topic, anchor.evidence)
+            if anchor.symbol and anchor.evidence.kind == "manifest_entry":
+                target = collector.location(
+                    facts.path, nodes[0].lineno, nodes[0].end_lineno
+                )
+                for key, step in collector.candidates.items():
+                    if step.kind == "interface" and anchor.evidence in step.evidence:
+                        collector.candidates[key] = replace(step, related=(target,))
+    for node in facts.tree.body:
+        if not isinstance(node, ast.If) or not isinstance(node.test, ast.Compare):
+            continue
+        test = node.test
+        if not (
+            isinstance(test.left, ast.Name)
+            and test.left.id == "__name__"
+            and len(test.ops) == 1
+            and isinstance(test.ops[0], ast.Eq)
+            and len(test.comparators) == 1
+            and isinstance(test.comparators[0], ast.Constant)
+            and test.comparators[0].value == "__main__"
+        ):
+            continue
+        location = collector.location(facts.path, node.lineno, node.end_lineno)
+        evidence = ReadingEvidence(
+            "source_entry", location, "直接运行脚本时执行此分支。"
+        )
+        entry_related: list[ReadingLocation] = []
+        for statement in node.body:
+            if isinstance(statement, ast.Expr) and isinstance(
+                statement.value, ast.Call
+            ):
+                called = _attribute(statement.value.func)
+                definitions = facts.definitions.get(called, [])
+                if len(definitions) == 1:
+                    target = definitions[0]
+                    entry_related.append(
+                        collector.location(facts.path, target.lineno, target.end_lineno)
+                    )
+        collector.add(
+            topic=topic,
+            kind="interface",
+            question="哪里有脚本启动分支？",
+            summary="脚本直接运行时的启动分支",
+            location=location,
+            evidence=(evidence,),
+            related=tuple(entry_related),
+        )
     return interesting
 
 
@@ -302,7 +377,16 @@ def collect_python(collector: ReadingCollector, state: AnalysisState) -> None:
         "Python：文档说明、显式导出、定义和静态导入的使用候选。"
     )
     files: dict[str, PythonFacts] = {}
-    for record in state.artifacts.files:
+    for record in sorted(
+        state.artifacts.files,
+        key=lambda record: (
+            record.path.relative_to(collector.root).as_posix()
+            not in collector.anchors_by_path
+            if record.path.is_relative_to(collector.root)
+            else True,
+            record.path.as_posix(),
+        ),
+    ):
         if record.language != Language.PYTHON:
             continue
         if not record.path.is_relative_to(collector.root):
@@ -317,7 +401,7 @@ def collect_python(collector: ReadingCollector, state: AnalysisState) -> None:
     for path in files:
         modules[_module(path)].append(path)
     interests = {
-        path: _seed(collector, facts) for path, facts in files.items()
+        path: _seed(collector, facts, files, modules) for path, facts in files.items()
     }
     for path, facts in files.items():
         for call in facts.calls:
@@ -342,16 +426,16 @@ def collect_python(collector: ReadingCollector, state: AnalysisState) -> None:
             if len(target_paths) != 1:
                 continue
             target_path = target_paths[0]
-            nodes = files[target_path].definitions.get(name, [])
-            if name not in interests[target_path] or len(nodes) != 1:
+            resolved = _resolve_definition(files[target_path], name, files, modules)
+            if name not in interests[target_path] or resolved is None:
                 continue
-            definition = nodes[0]
+            target_facts, definition = resolved
             location = collector.location(path, call.lineno, call.end_lineno)
             target = collector.location(
-                target_path, definition.lineno, definition.end_lineno
+                target_facts.path, definition.lineno, definition.end_lineno
             )
             collector.add(
-                topic=f"源码说明：{target_path}",
+                topic=f"源码位置：{target_path}",
                 kind="usage",
                 question="在哪里使用？",
                 summary=f"{qualified}(...) 的使用候选",

@@ -23,7 +23,7 @@ exclude = []
 # git = false
 # dependencies = false
 # insights = false
-# reading = true  # 试验性阅读指南，可独立于依赖图启用
+# reading = true  # 实验性阅读指南，仅整理文档和源码线索
 
 [git]
 period = "all"
