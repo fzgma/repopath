@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   resolve-version:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
       label: ${{ steps.version.outputs.label }}
@@ -48,7 +48,7 @@ jobs:
             executable: repopath.exe
             checksum: repopath.exe.sha256
           - platform: linux-x64
-            os: ubuntu-22.04
+            os: ubuntu-latest
             executable: repopath
             checksum: repopath.sha256
     runs-on: ${{ matrix.os }}
@@ -117,6 +117,12 @@ jobs:
           ./build/repopath "$smoke_root" -o "$smoke_root/report.md"
           test -f "$smoke_root/report.md"
 
+      - name: Check relocated executable file scanning
+        run: >-
+          python -S scripts/check_file_scan.py
+          --artifact "build/${{ matrix.executable }}"
+          --work-dir "${{ runner.temp }}/repopath-file-scan"
+
       - name: Create Windows checksum
         if: matrix.platform == 'windows-x64'
         shell: pwsh
@@ -143,7 +149,7 @@ jobs:
     needs:
       - resolve-version
       - build
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - name: Download build artifacts
         uses: actions/download-artifact@v4

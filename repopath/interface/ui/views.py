@@ -7,6 +7,7 @@ from itertools import islice
 from typing import Any, TypeAlias, TypeVar
 
 from ...model.dependency import DependencyEdge
+from ...model.file import FILE_STATISTICS_SCOPE
 from ...model.git import FileChangeStats
 from ...model.report import RepositoryReport
 from ...model.result import (
@@ -161,6 +162,7 @@ def render_report(
         metrics, values, strict=True
     ):
         column.metric(label, value, help=help_text)
+    st.caption(FILE_STATISTICS_SCOPE)
     _render_messages(report, st)
     _render_analysis_scope_hint(report, st)
     view = st.segmented_control(

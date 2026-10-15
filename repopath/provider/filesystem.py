@@ -1,12 +1,13 @@
 """本地文件系统 Provider。"""
 
+import codecs
 import os
-from fnmatch import fnmatch
+import re
 from collections.abc import Iterator
+from fnmatch import fnmatch
 from pathlib import Path
 
 from ..model.repository import Repository
-
 
 IGNORED_DIRS = {
     ".agents",
@@ -25,6 +26,48 @@ IGNORED_FILES = {
     "REPOPATH_REPORT.md",
     "REPOPATH_REPORT.json",
 }
+
+_BINARY_SIGNATURES = (
+    b"\x89PNG\r\n\x1a\n",
+    b"\xff\xd8\xff",
+    b"GIF87a",
+    b"GIF89a",
+    b"SQLite format 3\x00",
+    b"%PDF-",
+    b"PK\x03\x04",
+    b"PK\x05\x06",
+    b"PK\x07\x08",
+    b"\x1f\x8b",
+    b"\x7fELF",
+)
+_CONTROL_CHARACTERS = re.compile(r"[\x01-\x08\x0e-\x1f\x7f]")
+
+
+def _decode_text(content: bytes) -> str | None:
+    """按内容排除二进制，严格解码支持的文本编码并统一换行。"""
+    if content.startswith(_BINARY_SIGNATURES) or (
+        content.startswith(b"RIFF")
+        and content[8:12] in {b"WEBP", b"WAVE", b"AVI "}
+    ):
+        return None
+    # UTF-32 LE 与 UTF-16 LE 共用前两个 BOM 字节，必须先检查 UTF-32。
+    if content.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        encoding = "utf-32"
+    elif content.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        encoding = "utf-16"
+    else:
+        encoding = "utf-8-sig"
+    try:
+        text = content.decode(encoding)
+    except UnicodeError:
+        return None
+    # 解码后再检查，避免将 UTF-16/32 的正常零字节误当成二进制。
+    if "\x00" in text:
+        return None
+    # 允许常见文本空白及少量终端控制字符，控制字符密集的内容不计行。
+    if len(_CONTROL_CHARACTERS.findall(text)) > len(text) * 0.1:
+        return None
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 class FileSystemProvider:
@@ -91,13 +134,19 @@ class FileSystemProvider:
                     yield path
 
     def read_text(self, path: Path) -> str | None:
-        """以 UTF-8 容错模式读取文件内容。"""
+        """读取支持编码的文本，跳过二进制、超限及不可读文件。"""
         try:
             if (
                 self.max_file_size is not None
                 and path.stat().st_size > self.max_file_size
             ):
                 return None
-            return path.read_text(encoding="utf-8", errors="replace")
+            with path.open("rb") as stream:
+                content = stream.read(
+                    -1 if self.max_file_size is None else self.max_file_size + 1
+                )
+            if self.max_file_size is not None and len(content) > self.max_file_size:
+                return None
+            return _decode_text(content)
         except OSError:
             return None

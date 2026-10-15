@@ -1,6 +1,6 @@
 """Markdown 报告 Renderer。"""
 
-from ..model.file import FileRecord
+from ..model.file import FILE_STATISTICS_SCOPE, FileRecord
 from ..model.report import RepositoryReport
 from ..model.result import AnalyzerName, AnalyzerStatus
 
@@ -50,6 +50,8 @@ class MarkdownRenderer:
             f"{report.schema_version}",
             "",
             "## 概览",
+            "",
+            FILE_STATISTICS_SCOPE,
             "",
             f"- 文件数：{len(files)}",
             f"- 非空行数：{stats.total_non_empty_lines}",
@@ -605,6 +607,8 @@ class MarkdownRenderer:
             f"RepoPath {report.tool_version}",
             "",
             "## 概览",
+            "",
+            FILE_STATISTICS_SCOPE,
             "",
             f"- 文件数：{len(report.files)}",
             f"- 非空行数：{stats.total_non_empty_lines}",
